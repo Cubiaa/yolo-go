@@ -150,10 +150,6 @@ config := yolo.DefaultConfig().
 解决: 检查CUDA/DirectML安装，或使用CPU模式
 ```
 
-## 📄 许可证
-
-本项目采用 **GPL v3** 许可证 - 禁止商业使用
-
 ## 🙏 致谢
 
 - [ONNX Runtime](https://onnxruntime.ai/) - 模型推理引擎
