@@ -22,6 +22,18 @@ import (
 	"github.com/disintegration/imaging"
 )
 
+// 输入源类型常量
+const (
+	InputTypeFile    = "file"    // 文件输入
+	InputTypeVideo   = "video"   // 视频文件输入
+	InputTypeCamera  = "camera"  // 摄像头输入
+	InputTypeCam     = "cam"     // 摄像头输入（简写）
+	InputTypeRTSP    = "rtsp"    // RTSP流输入
+	InputTypeRTMP    = "rtmp"    // RTMP流输入
+	InputTypeScreen  = "screen"  // 屏幕录制输入
+	InputTypeDesktop = "desktop" // 桌面录制输入
+)
+
 // YOLOLiveWindow 实时视频播放窗口
 type YOLOLiveWindow struct {
 	app          fyne.App
@@ -61,19 +73,23 @@ type YOLOLiveWindow struct {
 }
 
 // NewYOLOLiveWindow 创建实时视频播放窗口
-func NewYOLOLiveWindow(detector *yolo.YOLO, inputPath string, options *yolo.DetectionOptions) *YOLOLiveWindow {
-	// 根据输入路径创建输入源
+func NewYOLOLiveWindow(detector *yolo.YOLO, inputType string, inputPath string, options *yolo.DetectionOptions) *YOLOLiveWindow {
 	var inputSource *yolo.InputSource
-	if strings.HasPrefix(inputPath, "rtsp://") {
+
+	// 根据明确的输入源类型创建输入源
+	switch strings.ToLower(inputType) {
+	case InputTypeFile, InputTypeVideo:
+		inputSource = yolo.NewFileInput(inputPath)
+	case InputTypeCamera, InputTypeCam:
+		inputSource = yolo.NewCameraInput(inputPath)
+	case InputTypeRTSP:
 		inputSource = yolo.NewRTSPInput(inputPath)
-	} else if strings.HasPrefix(inputPath, "rtmp://") {
+	case InputTypeRTMP:
 		inputSource = yolo.NewRTMPInput(inputPath)
-	} else if inputPath == "screen" || inputPath == "desktop" {
+	case InputTypeScreen, InputTypeDesktop:
 		inputSource = yolo.NewScreenInput()
-	} else if inputPath == "camera" || inputPath == "0" {
-		inputSource = yolo.NewCameraInput("0")
-	} else {
-		// 默认为文件输入
+	default:
+		// 如果类型未知，默认为文件输入
 		inputSource = yolo.NewFileInput(inputPath)
 	}
 
@@ -110,6 +126,69 @@ func NewYOLOLiveWindow(detector *yolo.YOLO, inputPath string, options *yolo.Dete
 	}()
 
 	return window
+}
+
+// detectInputType 自动检测输入源类型
+func detectInputType(inputPath string) string {
+	// 网络流检测
+	if strings.HasPrefix(inputPath, "rtsp://") {
+		return InputTypeRTSP
+	}
+	if strings.HasPrefix(inputPath, "rtmp://") {
+		return InputTypeRTMP
+	}
+
+	// 屏幕录制检测
+	if inputPath == "screen" || inputPath == "desktop" {
+		return InputTypeScreen
+	}
+
+	// 摄像头检测
+	if isCameraInput(inputPath) {
+		return InputTypeCamera
+	}
+
+	// 默认为文件输入
+	return InputTypeFile
+}
+
+// isCameraInput 检测是否为摄像头输入
+func isCameraInput(inputPath string) bool {
+	// 摄像头关键字
+	cameraKeywords := []string{
+		"camera",
+		"cam",
+		"webcam",
+	}
+
+	// 摄像头设备路径模式
+	cameraPatterns := []string{
+		"video=",     // Windows: video=0, video=1
+		"/dev/video", // Linux: /dev/video0, /dev/video1
+		"dshow:",     // Windows DirectShow
+		"vfwcap:",    // Windows Video for Windows
+	}
+
+	// 数字索引 (0, 1, 2, 3...)
+	if len(inputPath) == 1 && inputPath >= "0" && inputPath <= "9" {
+		return true
+	}
+
+	// 检查关键字
+	for _, keyword := range cameraKeywords {
+		if strings.EqualFold(inputPath, keyword) {
+			return true
+		}
+	}
+
+	// 检查设备路径模式
+	for _, pattern := range cameraPatterns {
+		if strings.HasPrefix(strings.ToLower(inputPath), pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // createWindow 创建窗口
@@ -432,8 +511,11 @@ func (live *YOLOLiveWindow) Run() {
 func LaunchFyneLiveWindow(detector *yolo.YOLO, videoPath string, options *yolo.DetectionOptions) error {
 	fmt.Printf("🎬 启动Fyne GUI窗口，视频: %s\n", videoPath)
 
+	// 自动检测输入源类型
+	inputType := detectInputType(videoPath)
+
 	// 创建并运行GUI窗口
-	liveWindow := NewYOLOLiveWindow(detector, videoPath, options)
+	liveWindow := NewYOLOLiveWindow(detector, inputType, videoPath, options)
 	liveWindow.Run()
 
 	return nil

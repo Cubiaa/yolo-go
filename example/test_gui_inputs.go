@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
-	"yolo-go/gui"
-	"yolo-go/yolo"
+
+	"github.com/Cubiaa/yolo-go/gui"
+	"github.com/Cubiaa/yolo-go/yolo"
 )
 
 func main() {
@@ -29,7 +30,7 @@ func main() {
 
 	// 测试1：从视频文件启动GUI
 	fmt.Println("🎬 测试1：从视频文件启动GUI")
-	liveWindow1 := gui.NewYOLOLiveWindow(detector, "test.mp4", options)
+	liveWindow1 := gui.NewYOLOLiveWindow(detector, gui.InputTypeFile, "test.mp4", options)
 	liveWindow1.Run()
 
 	// 测试2：从摄像头启动GUI
@@ -41,12 +42,12 @@ func main() {
 	}
 
 	// 使用默认摄像头
-	liveWindow2 := gui.NewYOLOLiveWindow(detector, "video=0", options)
+	liveWindow2 := gui.NewYOLOLiveWindow(detector, gui.InputTypeCamera, "0", options)
 	liveWindow2.Run()
 
 	// 测试3：从RTSP流启动GUI
 	fmt.Println("🎬 测试3：从RTSP流启动GUI")
-	liveWindow3 := gui.NewYOLOLiveWindow(detector, "rtsp://192.168.1.100:554/stream", options)
+	liveWindow3 := gui.NewYOLOLiveWindow(detector, gui.InputTypeRTSP, "rtsp://192.168.1.100:554/stream", options)
 	liveWindow3.Run()
 
 	// 测试4：从屏幕录制启动GUI
@@ -58,12 +59,12 @@ func main() {
 	}
 
 	// 使用主屏幕
-	liveWindow4 := gui.NewYOLOLiveWindow(detector, "desktop", options)
+	liveWindow4 := gui.NewYOLOLiveWindow(detector, gui.InputTypeScreen, "desktop", options)
 	liveWindow4.Run()
 
 	// 测试5：从RTMP流启动GUI
 	fmt.Println("🎬 测试5：从RTMP流启动GUI")
-	liveWindow5 := gui.NewYOLOLiveWindow(detector, "rtmp://server.com/live/stream", options)
+	liveWindow5 := gui.NewYOLOLiveWindow(detector, gui.InputTypeRTMP, "rtmp://server.com/live/stream", options)
 	liveWindow5.Run()
 
 	fmt.Println("✅ 多输入源GUI测试完成！")

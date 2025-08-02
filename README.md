@@ -43,7 +43,7 @@ package main
 import (
     "fmt"
     "log"
-    "yolo-go/yolo"
+    "github.com/Cubiaa/yolo-go/yolo"
 )
 
 func main() {
@@ -77,8 +77,8 @@ func main() {
 package main
 
 import (
-    "yolo-go/gui"
-    "yolo-go/yolo"
+    "github.com/Cubiaa/yolo-go/gui"
+    "github.com/Cubiaa/yolo-go/yolo"
 )
 
 func main() {
@@ -98,7 +98,7 @@ func main() {
         WithShowFPS(true)
 
     // 启动GUI窗口
-    liveWindow := gui.NewYOLOLiveWindow(detector, "test.mp4", options)
+    liveWindow := gui.NewYOLOLiveWindow(detector, gui.InputTypeFile, "test.mp4", options)
     liveWindow.Run()
 }
 ```
@@ -107,16 +107,16 @@ func main() {
 
 ```go
 // 摄像头检测
-liveWindow := gui.NewYOLOLiveWindow(detector, "video=0", options)
+liveWindow := gui.NewYOLOLiveWindow(detector, gui.InputTypeCamera, "0", options)
 
 // 屏幕录制检测
-liveWindow := gui.NewYOLOLiveWindow(detector, "desktop", options)
+liveWindow := gui.NewYOLOLiveWindow(detector, gui.InputTypeScreen, "desktop", options)
 
 // RTSP流检测
-liveWindow := gui.NewYOLOLiveWindow(detector, "rtsp://192.168.1.100:554/stream", options)
+liveWindow := gui.NewYOLOLiveWindow(detector, gui.InputTypeRTSP, "rtsp://192.168.1.100:554/stream", options)
 
 // RTMP流检测
-liveWindow := gui.NewYOLOLiveWindow(detector, "rtmp://server.com/live/stream", options)
+liveWindow := gui.NewYOLOLiveWindow(detector, gui.InputTypeRTMP, "rtmp://server.com/live/stream", options)
 ```
 
 ## ⚙️ 配置选项

@@ -22,13 +22,81 @@ func NewFileInput(path string) *InputSource {
 
 // NewCameraInput 创建摄像头输入源
 func NewCameraInput(device string) *InputSource {
+	// 如果传入的是通用关键字，自动选择默认摄像头设备
+	actualDevice := resolveCameraDevice(device)
+
 	return &InputSource{
 		Type: "camera",
-		Path: device,
+		Path: actualDevice,
 		Options: map[string]string{
 			"f": "30", // 帧率
 		},
 	}
+}
+
+// resolveCameraDevice 解析摄像头设备，将通用关键字转换为具体设备
+func resolveCameraDevice(device string) string {
+	// 通用摄像头关键字
+	cameraKeywords := []string{"camera", "cam", "webcam"}
+
+	// 检查是否为通用关键字
+	for _, keyword := range cameraKeywords {
+		if strings.EqualFold(device, keyword) {
+			// 返回默认摄像头设备
+			return getDefaultCameraDevice()
+		}
+	}
+
+	// 如果已经是具体设备路径，直接返回
+	return device
+}
+
+// getDefaultCameraDevice 获取默认摄像头设备
+func getDefaultCameraDevice() string {
+	// 尝试检测可用的摄像头设备
+	availableDevices := detectAvailableCameraDevices()
+
+	if len(availableDevices) > 0 {
+		return availableDevices[0] // 返回第一个可用的摄像头
+	}
+
+	// 如果没有检测到可用设备，返回默认值
+	return "video=0" // Windows 默认
+}
+
+// detectAvailableCameraDevices 检测可用的摄像头设备
+func detectAvailableCameraDevices() []string {
+	var availableDevices []string
+
+	// 常见的摄像头设备路径
+	possibleDevices := []string{
+		"video=0",     // Windows
+		"video=1",     // Windows
+		"/dev/video0", // Linux
+		"/dev/video1", // Linux
+		"0",           // 数字索引
+		"1",           // 数字索引
+	}
+
+	// 这里可以添加实际的设备检测逻辑
+	// 目前返回所有可能的设备，让 FFmpeg 去尝试
+	for _, device := range possibleDevices {
+		availableDevices = append(availableDevices, device)
+	}
+
+	return availableDevices
+}
+
+// GetCameraDeviceInfo 获取摄像头设备信息
+func GetCameraDeviceInfo() map[string]string {
+	devices := ListCameraDevices()
+	deviceInfo := make(map[string]string)
+
+	for i, device := range devices {
+		deviceInfo[fmt.Sprintf("camera_%d", i)] = device
+	}
+
+	return deviceInfo
 }
 
 // NewRTSPInput 创建RTSP流输入源
