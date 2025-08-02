@@ -1,4 +1,4 @@
-module yolo-go
+module github.com/Cubiaa/yolo-go
 
 go 1.24.2
 
