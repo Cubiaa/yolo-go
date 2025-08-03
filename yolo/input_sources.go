@@ -2,6 +2,7 @@ package yolo
 
 import (
 	"fmt"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -143,6 +144,7 @@ func GetCameraDeviceInfo() map[string]string {
 }
 
 // NewRTSPInput 创建RTSP流输入源
+// 支持带认证的URL格式: rtsp://username:password@host:port/path
 func NewRTSPInput(url string) *InputSource {
 	return &InputSource{
 		Type: "rtsp",
@@ -155,6 +157,7 @@ func NewRTSPInput(url string) *InputSource {
 }
 
 // NewRTMPInput 创建RTMP流输入源
+// 支持带认证的URL格式: rtmp://username:password@host:port/app/stream
 func NewRTMPInput(url string) *InputSource {
 	return &InputSource{
 		Type: "rtmp",
@@ -338,9 +341,50 @@ func (is *InputSource) Validate() error {
 		return nil
 	case "rtsp", "rtmp":
 		// 网络流验证
-		if !strings.HasPrefix(is.Path, "rtsp://") && !strings.HasPrefix(is.Path, "rtmp://") {
-			return fmt.Errorf("无效的流URL格式: %s", is.Path)
+		if is.Path == "" {
+			return fmt.Errorf("网络流URL不能为空")
 		}
+		
+		// 检查URL格式
+		if !strings.HasPrefix(is.Path, "rtsp://") && !strings.HasPrefix(is.Path, "rtmp://") {
+			return fmt.Errorf("无效的流URL格式: %s，必须以 rtsp:// 或 rtmp:// 开头", is.Path)
+		}
+		
+		// 验证URL格式的有效性
+		parsedURL, err := url.Parse(is.Path)
+		if err != nil {
+			return fmt.Errorf("无效的URL格式: %s，错误: %v", is.Path, err)
+		}
+		
+		// 检查主机名是否存在（去除认证信息后）
+		hostname := parsedURL.Hostname()
+		if hostname == "" {
+			return fmt.Errorf("URL缺少主机名: %s", is.Path)
+		}
+		
+		// 检查是否包含认证信息
+		if parsedURL.User != nil {
+			username := parsedURL.User.Username()
+			_, hasPassword := parsedURL.User.Password()
+			if username != "" {
+				fmt.Printf("检测到认证信息 - 用户名: %s, 密码: %s\n", username, 
+					func() string {
+						if hasPassword {
+							return "[已设置]"
+						}
+						return "[未设置]"
+					}())
+			}
+		}
+		
+		// 检查协议是否匹配
+		if is.Type == "rtsp" && parsedURL.Scheme != "rtsp" {
+			return fmt.Errorf("RTSP输入源必须使用rtsp://协议: %s", is.Path)
+		}
+		if is.Type == "rtmp" && parsedURL.Scheme != "rtmp" {
+			return fmt.Errorf("RTMP输入源必须使用rtmp://协议: %s", is.Path)
+		}
+		
 		return nil
 	case "screen":
 		// 屏幕录制验证
