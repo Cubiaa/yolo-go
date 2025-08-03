@@ -218,6 +218,20 @@ func (live *YOLOLiveWindow) createWindow() {
 	live.imageDisplay = &canvas.Image{}
 	live.imageDisplay.FillMode = canvas.ImageFillContain
 	live.imageDisplay.SetMinSize(fyne.NewSize(800, 600))
+	
+	// 创建一个测试图像来验证显示功能
+	testImg := image.NewRGBA(image.Rect(0, 0, 320, 240))
+	for y := 0; y < 240; y++ {
+		for x := 0; x < 320; x++ {
+			// 创建一个简单的渐变图案
+			r := uint8(x * 255 / 320)
+			g := uint8(y * 255 / 240)
+			b := uint8(128)
+			testImg.Set(x, y, color.RGBA{r, g, b, 255})
+		}
+	}
+	live.imageDisplay.Image = testImg
+	fmt.Printf("设置了测试图像，尺寸: %dx%d\n", testImg.Bounds().Dx(), testImg.Bounds().Dy())
 
 	// 创建状态标签
 	live.statusLabel = widget.NewLabel("准备自动播放...")
@@ -296,26 +310,62 @@ func (live *YOLOLiveWindow) processVideo() {
 	// 将配置设置到检测器中
 	live.detector.SetRuntimeConfig(detectionOptions)
 
-	// 根据性能模式设置参数（针对高性能CPU优化）
-	switch live.performanceMode {
-	case "fast":
-		live.frameSkip = 1 // 高性能CPU可以处理更多帧
-		live.maxImageWidth = 1024
-		live.maxImageHeight = 768
-	case "balanced":
-		live.frameSkip = 1
-		live.maxImageWidth = 1280
-		live.maxImageHeight = 720
-	case "accurate":
-		live.frameSkip = 1
-		live.maxImageWidth = 1920
-		live.maxImageHeight = 1080
-	}
+	// 性能模式参数已在SetPerformanceMode中设置
 
 	frameCount := 0
+	// 创建检测结果通道，用于异步处理
+	detectionChan := make(chan struct{
+		img image.Image
+		detections []yolo.Detection
+		frameNum int
+	}, 2) // 缓冲2帧，避免阻塞
+
+	// 启动UI更新协程
+	go func() {
+		for result := range detectionChan {
+			if !live.isPlaying {
+				return
+			}
+
+			live.frameCount = result.frameNum
+			fmt.Printf("GUI更新协程收到第 %d 帧，图像尺寸: %dx%d\n", result.frameNum, result.img.Bounds().Dx(), result.img.Bounds().Dy())
+
+			// 计算FPS
+			elapsed := time.Since(live.startTime).Seconds()
+			if elapsed > 0 {
+				live.fps = float64(live.frameCount) / elapsed
+			}
+
+			// 在主线程中更新UI
+			fyne.Do(func() {
+				fmt.Printf("开始更新GUI显示，帧号: %d\n", result.frameNum)
+				
+				// 更新FPS显示
+				if live.showFPS {
+					live.fpsLabel.SetText(fmt.Sprintf("FPS: %.1f", live.fps))
+				}
+
+				// 在图像上绘制检测结果
+				processedImage := live.drawDetectionsOnImage(result.img, result.detections)
+				fmt.Printf("图像处理完成，处理后图像尺寸: %dx%d\n", processedImage.Bounds().Dx(), processedImage.Bounds().Dy())
+
+				// 更新显示
+				live.imageDisplay.Image = processedImage
+				live.imageDisplay.Refresh()
+				fmt.Printf("GUI显示已更新，帧号: %d\n", result.frameNum)
+
+				// 更新状态
+				if live.inputSource.GetInputType() == "camera" {
+					live.statusLabel.SetText(fmt.Sprintf("摄像头帧: %d, 检测: %d", live.frameCount, len(result.detections)))
+				} else {
+					live.statusLabel.SetText(fmt.Sprintf("帧: %d, 检测: %d", live.frameCount, len(result.detections)))
+				}
+			})
+		}
+	}()
 
 	// 根据输入类型选择合适的处理器
-	if live.inputSource.Type == "camera" {
+	if live.inputSource.GetInputType() == "camera" {
 		// 使用专门的摄像头处理器
 		cameraProcessor := yolo.NewCameraVideoProcessor(live.detector, live.inputSource.Path)
 		
@@ -333,39 +383,30 @@ func (live *YOLOLiveWindow) processVideo() {
 
 			frameCount++
 
+			// 每5帧输出一次调试信息
+			if frameCount%5 == 1 {
+				fmt.Printf("GUI收到第 %d 帧，图像尺寸: %dx%d，检测数量: %d\n", frameCount, img.Bounds().Dx(), img.Bounds().Dy(), len(detections))
+			}
+
 			// 跳帧处理以提高性能
 			if frameCount%live.frameSkip != 0 {
 				return
 			}
 
-			live.frameCount++
-
-			// 计算FPS
-			elapsed := time.Since(live.startTime).Seconds()
-			if elapsed > 0 {
-				live.fps = float64(live.frameCount) / elapsed
+			// 异步发送检测结果到UI更新协程
+			select {
+			case detectionChan <- struct{
+				img image.Image
+				detections []yolo.Detection
+				frameNum int
+			}{img: img, detections: detections, frameNum: frameCount}:
+				fmt.Printf("成功发送第 %d 帧到GUI更新通道\n", frameCount)
+			default:
+				fmt.Printf("GUI更新通道满，跳过第 %d 帧\n", frameCount)
 			}
 
-			// 使用fyne.Do在主线程中更新UI
-			fyne.Do(func() {
-				// 更新FPS显示
-				if live.showFPS {
-					live.fpsLabel.SetText(fmt.Sprintf("FPS: %.1f", live.fps))
-				}
-
-				// 在图像上绘制检测结果
-				processedImage := live.drawDetectionsOnImage(img, detections)
-
-				// 更新显示
-				live.imageDisplay.Image = processedImage
-				live.imageDisplay.Refresh()
-
-				// 更新状态
-				live.statusLabel.SetText(fmt.Sprintf("摄像头帧: %d, 检测: %d", live.frameCount, len(detections)))
-			})
-
-			// 控制播放速度
-			time.Sleep(33 * time.Millisecond) // 约30 FPS
+			// 控制播放速度 - 摄像头使用较慢的速度
+			time.Sleep(100 * time.Millisecond) // 降低到10 FPS，减少处理负担
 		})
 		
 		if err != nil {
@@ -398,26 +439,18 @@ func (live *YOLOLiveWindow) processVideo() {
 				live.fps = float64(live.frameCount) / elapsed
 			}
 
-			// 使用fyne.Do在主线程中更新UI
-			fyne.Do(func() {
-				// 更新FPS显示
-				if live.showFPS {
-					live.fpsLabel.SetText(fmt.Sprintf("FPS: %.1f", live.fps))
+			// 异步发送检测结果到UI更新协程
+			if result.Image != nil {
+				select {
+				case detectionChan <- struct{
+					img image.Image
+					detections []yolo.Detection
+					frameNum int
+				}{img: result.Image, detections: result.Detections, frameNum: frameCount}:
+				default:
+					// 如果通道满了，跳过这一帧，避免阻塞
 				}
-
-				// 如果有图像数据，显示它
-				if result.Image != nil {
-					// 在图像上绘制检测结果
-					processedImage := live.drawDetectionsOnImage(result.Image, result.Detections)
-
-					// 更新显示
-					live.imageDisplay.Image = processedImage
-					live.imageDisplay.Refresh()
-				}
-
-				// 更新状态
-				live.statusLabel.SetText(fmt.Sprintf("帧: %d, 检测: %d", live.frameCount, len(result.Detections)))
-			})
+			}
 
 			// 控制播放速度 - 针对高性能CPU优化
 			time.Sleep(8 * time.Millisecond) // 约120 FPS，更流畅
@@ -438,12 +471,24 @@ func (live *YOLOLiveWindow) drawDetectionsOnImage(img image.Image, detections []
 	originalWidth := float32(originalBounds.Dx())
 	originalHeight := float32(originalBounds.Dy())
 	
-	// 性能优化：缩放图像以提高处理速度
+	// 性能优化：缩放图像以提高处理速度（针对高性能CPU优化）
 	var scale float32 = 1.0
-	if originalBounds.Dx() > live.maxImageWidth || originalBounds.Dy() > live.maxImageHeight {
+	var targetWidth, targetHeight int
+	
+	// 根据性能模式动态调整显示尺寸
+	switch live.performanceMode {
+	case "fast":
+		targetWidth, targetHeight = 640, 480
+	case "balanced":
+		targetWidth, targetHeight = 1024, 768
+	case "accurate":
+		targetWidth, targetHeight = live.maxImageWidth, live.maxImageHeight
+	}
+	
+	if originalBounds.Dx() > targetWidth || originalBounds.Dy() > targetHeight {
 		// 计算缩放比例
-		scaleX := float32(live.maxImageWidth) / originalWidth
-		scaleY := float32(live.maxImageHeight) / originalHeight
+		scaleX := float32(targetWidth) / originalWidth
+		scaleY := float32(targetHeight) / originalHeight
 		scale = scaleX
 		if scaleY < scaleX {
 			scale = scaleY
@@ -597,6 +642,46 @@ func (live *YOLOLiveWindow) getColor(colorName string) color.Color {
 }
 
 // Run 运行窗口
+// SetPerformanceMode 设置性能模式
+func (live *YOLOLiveWindow) SetPerformanceMode(mode string) {
+	live.performanceMode = mode
+	
+	// 根据性能模式更新参数
+	switch mode {
+	case "fast":
+		live.frameSkip = 2  // 跳帧处理，每2帧处理一次
+		live.maxImageWidth = 320   // 更小的图像尺寸
+		live.maxImageHeight = 320
+		// 调整检测阈值以提升速度
+		live.confThreshold = 0.5   // 更高的置信度阈值
+		live.iouThreshold = 0.6    // 更高的IOU阈值
+	case "balanced":
+		live.frameSkip = 1
+		live.maxImageWidth = 640
+		live.maxImageHeight = 640
+		live.confThreshold = 0.25
+		live.iouThreshold = 0.45
+	case "accurate":
+		live.frameSkip = 1
+		live.maxImageWidth = 832
+		live.maxImageHeight = 832
+		live.confThreshold = 0.15  // 更低的置信度阈值，检测更多对象
+		live.iouThreshold = 0.4
+	default:
+		live.performanceMode = "balanced"
+		live.frameSkip = 1
+		live.maxImageWidth = 640
+		live.maxImageHeight = 640
+		live.confThreshold = 0.25
+		live.iouThreshold = 0.45
+	}
+}
+
+// GetPerformanceMode 获取当前性能模式
+func (live *YOLOLiveWindow) GetPerformanceMode() string {
+	return live.performanceMode
+}
+
 func (live *YOLOLiveWindow) Run() {
 	live.window.ShowAndRun()
 }

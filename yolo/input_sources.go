@@ -2,6 +2,8 @@ package yolo
 
 import (
 	"fmt"
+	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -68,21 +70,59 @@ func getDefaultCameraDevice() string {
 }
 
 // detectAvailableCameraDevices 检测可用的摄像头设备
+// detectRealCameraDevices 通过FFmpeg实际检测可用的摄像头设备
+func detectRealCameraDevices() []string {
+	var devices []string
+
+	// 执行FFmpeg命令检测设备
+	cmd := exec.Command("ffmpeg", "-list_devices", "true", "-f", "dshow", "-i", "dummy")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// FFmpeg命令失败，返回空列表
+		return devices
+	}
+
+	// 解析输出，提取视频设备名称
+	outputStr := string(output)
+	lines := strings.Split(outputStr, "\n")
+
+	// 使用正则表达式匹配视频设备
+	videoDeviceRegex := regexp.MustCompile(`\[dshow @ [^\]]+\] "([^"]+)" \(video\)`)
+
+	for _, line := range lines {
+		matches := videoDeviceRegex.FindStringSubmatch(line)
+		if len(matches) > 1 {
+			deviceName := matches[1]
+			// 过滤掉虚拟摄像头
+			if !strings.Contains(strings.ToLower(deviceName), "virtual") {
+				devices = append(devices, deviceName)
+			}
+		}
+	}
+
+	return devices
+}
+
 func detectAvailableCameraDevices() []string {
 	var availableDevices []string
 
-	// 常见的摄像头设备路径
-	possibleDevices := []string{
-		"video=0",     // Windows
-		"video=1",     // Windows
-		"/dev/video0", // Linux
-		"/dev/video1", // Linux
-		"0",           // 数字索引
-		"1",           // 数字索引
+	// 尝试通过FFmpeg检测实际的摄像头设备
+	realDevices := detectRealCameraDevices()
+	if len(realDevices) > 0 {
+		return realDevices
 	}
 
-	// 这里可以添加实际的设备检测逻辑
-	// 目前返回所有可能的设备，让 FFmpeg 去尝试
+	// 如果检测失败，返回常见的摄像头设备路径
+	possibleDevices := []string{
+		"USB2.0 HD UVC WebCam", // 实际检测到的设备名
+		"video=0",              // Windows
+		"video=1",              // Windows
+		"/dev/video0",          // Linux
+		"/dev/video1",          // Linux
+		"0",                    // 数字索引
+		"1",                    // 数字索引
+	}
+
 	for _, device := range possibleDevices {
 		availableDevices = append(availableDevices, device)
 	}
@@ -228,7 +268,33 @@ func (is *InputSource) GetFFmpegOptions() []string {
 
 // IsRealTime 判断是否为实时输入源
 func (is *InputSource) IsRealTime() bool {
-	return is.Type != "file"
+	return is.Type == "camera" || is.Type == "rtsp" || is.Type == "rtmp" || is.Type == "screen"
+}
+
+// GetInputType 获取输入源类型
+func (is *InputSource) GetInputType() string {
+	return is.Type
+}
+
+// GetCameraIndex 获取摄像头索引（用于兼容性）
+func (is *InputSource) GetCameraIndex() int {
+	if is.Type != "camera" {
+		return -1
+	}
+	
+	// 尝试从路径中提取数字索引
+	if len(is.Path) == 1 && is.Path >= "0" && is.Path <= "9" {
+		return int(is.Path[0] - '0')
+	}
+	
+	// 从 video=X 格式中提取
+	if strings.HasPrefix(is.Path, "video=") && len(is.Path) > 6 {
+		if is.Path[6] >= '0' && is.Path[6] <= '9' {
+			return int(is.Path[6] - '0')
+		}
+	}
+	
+	return 0 // 默认返回0
 }
 
 // Validate 验证输入源
@@ -248,14 +314,26 @@ func (is *InputSource) Validate() error {
 		// 检查常见的摄像头设备格式
 		validFormats := []string{"video=", "/dev/video", "0", "1", "2", "3", "4"}
 		isValid := false
+		
+		// 检查是否为标准格式
 		for _, format := range validFormats {
 			if strings.HasPrefix(is.Path, format) || is.Path == format {
 				isValid = true
 				break
 			}
 		}
+		
+		// 如果不是标准格式，检查是否为完整的设备名称（包含字母和空格）
 		if !isValid {
-			return fmt.Errorf("不支持的摄像头设备格式: %s，支持的格式: video=0, /dev/video0, 0, 1, 2等", is.Path)
+			// 允许包含字母、数字、空格、点号、括号的设备名称
+			deviceNameRegex := regexp.MustCompile(`^[a-zA-Z0-9\s\.\(\)_-]+$`)
+			if deviceNameRegex.MatchString(is.Path) {
+				isValid = true
+			}
+		}
+		
+		if !isValid {
+			return fmt.Errorf("不支持的摄像头设备格式: %s，支持的格式: video=0, /dev/video0, 0, 1, 2等或完整设备名称", is.Path)
 		}
 		return nil
 	case "rtsp", "rtmp":

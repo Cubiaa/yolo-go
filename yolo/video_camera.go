@@ -49,13 +49,14 @@ func (cvp *CameraVideoProcessor) ProcessCameraWithCallback(callback func(image.I
 	// 添加输入源
 	args = append(args, "-i", ffmpegInput)
 	
-	// 输出选项
+	// 输出选项 - 优化性能
 	args = append(args,
 		"-f", "image2pipe",        // 输出格式为图像管道
 		"-pix_fmt", "rgb24",       // 像素格式
 		"-vcodec", "rawvideo",     // 视频编解码器
-		"-r", "10",               // 降低帧率以减少处理负担
-		"-s", "640x480",          // 固定尺寸
+		"-r", "5",                // 进一步降低帧率到5fps
+		"-s", "320x240",          // 降低分辨率以提高处理速度
+		"-rtbufsize", "100M",     // 增大缓冲区
 		"-",                      // 输出到stdout
 	)
 	
@@ -97,37 +98,51 @@ func (cvp *CameraVideoProcessor) ProcessCameraWithCallback(callback func(image.I
 		}
 	}()
 	
-	// 读取帧数据
-	frameSize := 640 * 480 * 3 // RGB24格式
+	// 读取帧数据 - 更新为320x240分辨率
+	frameSize := 320 * 240 * 3 // RGB24格式
 	frameBuffer := make([]byte, frameSize)
 	
+	fmt.Printf("开始读取摄像头帧数据，期望帧大小: %d 字节 (320x240)\n", frameSize)
+	
 	for cvp.isRunning {
-		// 读取一帧数据
-		n, err := stdout.Read(frameBuffer)
-		if err != nil {
-			if cvp.isRunning {
-				callback(nil, nil, fmt.Errorf("读取帧数据失败: %v", err))
+		// 逐字节读取完整帧
+		bytesRead := 0
+		for bytesRead < frameSize && cvp.isRunning {
+			n, err := stdout.Read(frameBuffer[bytesRead:])
+			if err != nil {
+				if cvp.isRunning {
+					callback(nil, nil, fmt.Errorf("读取帧数据失败: %v", err))
+				}
+				return nil
 			}
-			break
+			bytesRead += n
 		}
 		
-		if n != frameSize {
-			continue // 跳过不完整的帧
+		if bytesRead != frameSize {
+			fmt.Printf("帧数据不完整: 读取 %d 字节，期望 %d 字节\n", bytesRead, frameSize)
+			continue
 		}
 		
-		// 将原始数据转换为Go图像
+		// 将原始数据转换为Go图像 - 320x240分辨率
 		img := &image.RGBA{
-			Pix:    make([]byte, 640*480*4),
-			Stride: 640 * 4,
-			Rect:   image.Rect(0, 0, 640, 480),
+			Pix:    make([]byte, 320*240*4),
+			Stride: 320 * 4,
+			Rect:   image.Rect(0, 0, 320, 240),
 		}
 		
 		// RGB24转RGBA
-		for i := 0; i < 640*480; i++ {
+		for i := 0; i < 320*240; i++ {
 			img.Pix[i*4] = frameBuffer[i*3]     // R
 			img.Pix[i*4+1] = frameBuffer[i*3+1] // G
 			img.Pix[i*4+2] = frameBuffer[i*3+2] // B
 			img.Pix[i*4+3] = 255                // A
+		}
+		
+		cvp.frameCount++
+		
+		// 每5帧输出一次调试信息
+		if cvp.frameCount%5 == 1 {
+			fmt.Printf("成功读取第 %d 帧，图像尺寸: %dx%d\n", cvp.frameCount, img.Bounds().Dx(), img.Bounds().Dy())
 		}
 		
 		// 进行YOLO检测
@@ -136,8 +151,6 @@ func (cvp *CameraVideoProcessor) ProcessCameraWithCallback(callback func(image.I
 			callback(img, nil, fmt.Errorf("YOLO检测失败: %v", err))
 			continue
 		}
-		
-		cvp.frameCount++
 		
 		// 通过回调返回结果
 		callback(img, detections, nil)
