@@ -93,6 +93,27 @@ func NewYOLOLiveWindow(detector *yolo.YOLO, inputType string, inputPath string, 
 		inputSource = yolo.NewFileInput(inputPath)
 	}
 
+	// 设置默认值，然后使用options中的值覆盖
+	boxColor := "red"
+	if options.BoxColor != "" {
+		boxColor = options.BoxColor
+	}
+	
+	labelColor := "white"
+	if options.LabelColor != "" {
+		labelColor = options.LabelColor
+	}
+	
+	lineWidth := 2
+	if options.LineWidth > 0 {
+		lineWidth = options.LineWidth
+	}
+	
+	fontSize := 12
+	if options.FontSize > 0 {
+		fontSize = options.FontSize
+	}
+
 	window := &YOLOLiveWindow{
 		app:           app.New(),
 		detector:      detector,
@@ -102,10 +123,10 @@ func NewYOLOLiveWindow(detector *yolo.YOLO, inputType string, inputPath string, 
 		drawLabels:    options.DrawLabels,
 		confThreshold: float64(options.ConfThreshold),
 		iouThreshold:  float64(options.IOUThreshold),
-		boxColor:      "red",
-		labelColor:    "white",
-		lineWidth:     2,
-		fontSize:      12,
+		boxColor:      boxColor,
+		labelColor:    labelColor,
+		lineWidth:     lineWidth,
+		fontSize:      fontSize,
 		showFPS:       options.ShowFPS,
 		stopChan:      make(chan bool),
 
@@ -602,15 +623,7 @@ func (live *YOLOLiveWindow) drawLabel(img *image.RGBA, className string, score f
 		y = bounds.Min.Y
 	}
 
-	// 绘制文本背景
-	textWidth := len(label) * live.fontSize / 2
-	textHeight := live.fontSize
-
-	for i := 0; i < textWidth && x+i < bounds.Max.X; i++ {
-		for j := 0; j < textHeight && y+j < bounds.Max.Y; j++ {
-			img.Set(x+i, y+j, color.Black)
-		}
-	}
+	// 不绘制文本背景，直接绘制文本
 
 	// 绘制文本
 	point := fixed.Point26_6{X: fixed.Int26_6(x * 64), Y: fixed.Int26_6(y * 64)}

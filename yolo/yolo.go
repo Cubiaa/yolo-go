@@ -25,6 +25,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// containsDynamicDimension 检查形状是否包含动态维度(-1)
+func containsDynamicDimension(shape []int64) bool {
+	for _, dim := range shape {
+		if dim == -1 {
+			return true
+		}
+	}
+	return false
+}
+
 // GUILauncherFunc 函数类型用于启动GUI窗口
 type GUILauncherFunc func(detector *YOLO, videoPath string, options *DetectionOptions) error
 
@@ -330,9 +340,9 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 		fmt.Printf("📊 使用正方形输入形状: %dx%d -> %v\n", yoloConfig.InputSize, yoloConfig.InputSize, modelInputShape)
 	}
 	
-	// 输出形状通常在运行时确定，这里设置一个占位符
-	modelOutputShape = []int64{1, -1, -1} // -1 表示动态维度
-	fmt.Printf("📊 输出形状: %v (动态)\n", modelOutputShape)
+	// 输出形状设置为标准YOLO格式，避免动态维度导致的张量创建错误
+	modelOutputShape = []int64{1, 84, 8400} // 标准YOLO输出格式
+	fmt.Printf("📊 输出形状: %v (标准YOLO格式)\n", modelOutputShape)
 
 	return &YOLO{
 		config:           yoloConfig,
@@ -410,25 +420,29 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 	}
 	defer inputTensor.Destroy()
 
-	// 创建输出张量（使用动态形状）
+	// 创建输出张量（智能适配模型输出形状）
 	var outputShape ort.Shape
 	var outputDataSize int
-	if len(y.modelOutputShape) >= 3 {
-		// 使用模型的实际输出形状
+	
+	// 如果是第一次推理或者modelOutputShape包含动态维度，使用标准形状进行探测
+	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
+		// 使用标准YOLO输出形状进行第一次推理
+		outputShape = ort.NewShape(1, 84, 8400)
+		outputDataSize = 1 * 84 * 8400
+		fmt.Println("🔍 使用标准YOLO输出形状进行模型探测: [1, 84, 8400]")
+	} else {
+		// 使用已知的模型输出形状
 		outputShape = ort.NewShape(y.modelOutputShape...)
 		outputDataSize = 1
 		for _, dim := range y.modelOutputShape {
 			outputDataSize *= int(dim)
 		}
-		fmt.Printf("🔧 使用动态输出形状: %v (数据大小: %d)\n", y.modelOutputShape, outputDataSize)
-	} else {
-		// 回退到默认形状
-		outputShape = ort.NewShape(1, 84, 8400)
-		outputDataSize = 1 * 84 * 8400
-		fmt.Println("⚠️  使用默认输出形状: [1, 84, 8400]")
+		fmt.Printf("📊 使用已知模型输出形状: %v\n", y.modelOutputShape)
 	}
+	
 	outputData := make([]float32, outputDataSize)
 	outputTensor, err := ort.NewTensor(outputShape, outputData)
+
 	if err != nil {
 		return nil, fmt.Errorf("无法创建输出张量: %v", err)
 	}
@@ -440,8 +454,15 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 		return nil, fmt.Errorf("推理失败: %v", err)
 	}
 
+	// 获取实际的输出形状并更新模型信息
+	actualOutputShape := outputTensor.GetShape()
+	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
+		y.modelOutputShape = actualOutputShape
+		fmt.Printf("✅ 自动检测到模型实际输出形状: %v\n", actualOutputShape)
+	}
+
 	// 解析检测结果
-	detections := y.parseDetections(outputTensor.GetData(), outputTensor.GetShape())
+	detections := y.parseDetections(outputTensor.GetData(), actualOutputShape)
 
 	// 将坐标从模型输入尺寸转换回原始图像尺寸
 	var scaleX, scaleY float32
@@ -668,13 +689,21 @@ func (y *YOLO) preprocessImage(imagePath string) ([]float32, error) {
 
 // 解析检测结果
 func (y *YOLO) parseDetections(outputData []float32, outputShape []int64) []Detection {
-	if len(outputShape) != 3 || outputShape[0] != 1 || outputShape[1] != 84 {
+	if len(outputShape) != 3 || outputShape[0] != 1 {
+		fmt.Printf("⚠️  不支持的输出形状: %v\n", outputShape)
 		return nil
 	}
 
-	numDetections := int(outputShape[2]) // 8400
-	numFeatures := int(outputShape[1])   // 84
-	numClasses := 80
+	numDetections := int(outputShape[2]) // 例如: 8400
+	numFeatures := int(outputShape[1])   // 例如: 84, 85, 等
+	numClasses := numFeatures - 4        // 动态计算类别数量 (总特征数 - 4个坐标)
+	
+	if numClasses <= 0 {
+		fmt.Printf("⚠️  无效的类别数量: %d (特征数: %d)\n", numClasses, numFeatures)
+		return nil
+	}
+	
+	fmt.Printf("📊 解析输出: %d个检测框, %d个特征, %d个类别\n", numDetections, numFeatures, numClasses)
 
 	var detections []Detection
 
@@ -999,17 +1028,7 @@ func (y *YOLO) drawLabel(img *image.RGBA, label string, x, yPos int) {
 		yPos = bounds.Max.Y - textHeight - padding
 	}
 
-	// 绘制背景矩形（不透明黑色，确保可见）
-	bgColor := color.RGBA{0, 0, 0, 255} // 完全不透明的黑色
-	for dy := -padding; dy < textHeight+padding; dy++ {
-		for dx := -padding; dx < textWidth+padding; dx++ {
-			px := x + dx
-			py := yPos + dy
-			if px >= 0 && py >= 0 && px < bounds.Max.X && py < bounds.Max.Y {
-				img.Set(px, py, bgColor)
-			}
-		}
-	}
+	// 不绘制背景矩形，直接绘制文本
 
 	// 获取标签颜色配置
 	labelColor := color.RGBA{255, 255, 255, 255} // 默认白色
@@ -1281,21 +1300,24 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 	}
 	defer inputTensor.Destroy()
 
-	// 创建输出张量（使用动态形状）
+	// 创建输出张量（智能适配模型输出形状）
 	var outputShape ort.Shape
 	var outputDataSize int
-	if len(y.modelOutputShape) >= 3 {
-		// 使用模型的实际输出形状
+	
+	// 如果是第一次推理或者modelOutputShape包含动态维度，使用标准形状进行探测
+	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
+		// 使用标准YOLO输出形状进行第一次推理
+		outputShape = ort.NewShape(1, 84, 8400)
+		outputDataSize = 1 * 84 * 8400
+	} else {
+		// 使用已知的模型输出形状
 		outputShape = ort.NewShape(y.modelOutputShape...)
 		outputDataSize = 1
 		for _, dim := range y.modelOutputShape {
 			outputDataSize *= int(dim)
 		}
-	} else {
-		// 回退到默认形状
-		outputShape = ort.NewShape(1, 84, 8400)
-		outputDataSize = 1 * 84 * 8400
 	}
+	
 	outputData := make([]float32, outputDataSize)
 	outputTensor, err := ort.NewTensor(outputShape, outputData)
 	if err != nil {
@@ -1305,12 +1327,19 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 
 	// 运行推理
 	err = y.session.Run([]ort.Value{inputTensor}, []ort.Value{outputTensor})
+
 	if err != nil {
 		return nil, fmt.Errorf("推理失败: %v", err)
 	}
 
+	// 获取实际的输出形状并更新模型信息
+	actualOutputShape := outputTensor.GetShape()
+	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
+		y.modelOutputShape = actualOutputShape
+	}
+
 	// 解析检测结果
-	detections := y.parseDetections(outputTensor.GetData(), outputTensor.GetShape())
+	detections := y.parseDetections(outputTensor.GetData(), actualOutputShape)
 
 	// 将坐标从模型输入尺寸转换回原始图像尺寸
 	var scaleX, scaleY float32

@@ -140,9 +140,33 @@ func (svp *SimpleVideoProcessor) drawDetectionsOnImage(img image.Image, detectio
 	result := image.NewRGBA(bounds)
 	draw.Draw(result, bounds, img, bounds.Min, draw.Src)
 
+	// 获取颜色配置
+	boxColor := color.RGBA{255, 0, 0, 255} // 默认红色
+	if svp.detector.runtimeConfig != nil && svp.detector.runtimeConfig.BoxColor != "" {
+		if parsedColor := svp.detector.parseColor(svp.detector.runtimeConfig.BoxColor); parsedColor != nil {
+			boxColor = *parsedColor
+		}
+	}
+
 	// 绘制每个检测结果
 	for _, detection := range detections {
-		svp.drawBBoxOnImage(result, detection.Box, color.RGBA{255, 0, 0, 255})
+		// 检查是否应该画框和标签
+		drawBoxes := true
+		drawLabels := true
+		if svp.detector.runtimeConfig != nil {
+			drawBoxes = svp.detector.runtimeConfig.DrawBoxes
+			drawLabels = svp.detector.runtimeConfig.DrawLabels
+		}
+
+		if drawBoxes {
+			svp.drawBBoxOnImage(result, detection.Box, boxColor)
+		}
+
+		if drawLabels {
+			// 绘制标签文本
+			label := fmt.Sprintf("%s %.2f", detection.Class, detection.Score)
+			svp.drawLabelOnImage(result, label, detection.Box)
+		}
 	}
 
 	return result
@@ -166,29 +190,97 @@ func (svp *SimpleVideoProcessor) drawBBoxOnImage(img draw.Image, bbox [4]float32
 	x2 = int(max(0, min(float32(x2), float32(width-1))))
 	y2 = int(max(0, min(float32(y2), float32(height-1))))
 
-	// 绘制边界框
+	// 获取线条宽度
 	lineWidth := 2
+	if svp.detector.runtimeConfig != nil && svp.detector.runtimeConfig.LineWidth > 0 {
+		lineWidth = svp.detector.runtimeConfig.LineWidth
+	}
+
+	// 绘制边界框
 	for i := 0; i < lineWidth; i++ {
 		// 上边
 		for x := x1; x <= x2; x++ {
-			img.Set(x, y1+i, lineColor)
+			if y1+i < height {
+				img.Set(x, y1+i, lineColor)
+			}
 		}
 		// 下边
 		for x := x1; x <= x2; x++ {
-			img.Set(x, y2-i, lineColor)
+			if y2-i >= 0 {
+				img.Set(x, y2-i, lineColor)
+			}
 		}
 		// 左边
 		for y := y1; y <= y2; y++ {
-			img.Set(x1+i, y, lineColor)
+			if x1+i < width {
+				img.Set(x1+i, y, lineColor)
+			}
 		}
 		// 右边
 		for y := y1; y <= y2; y++ {
-			img.Set(x2-i, y, lineColor)
+			if x2-i >= 0 {
+				img.Set(x2-i, y, lineColor)
+			}
 		}
 	}
 }
 
-// loadImage 加载图像文件
+// drawLabelOnImage 在图像上绘制标签
+func (svp *SimpleVideoProcessor) drawLabelOnImage(img *image.RGBA, label string, bbox [4]float32) {
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	// 计算标签位置
+	x := int(bbox[0] * float32(width))
+	y := int(bbox[1] * float32(height)) - 20
+
+	// 确保标签在图像范围内
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 20
+	}
+
+	// 获取字体大小
+	fontSize := 12
+	if svp.detector.runtimeConfig != nil && svp.detector.runtimeConfig.FontSize > 0 {
+		fontSize = svp.detector.runtimeConfig.FontSize
+	}
+
+	// 不绘制背景矩形，直接绘制文本
+
+	// 获取标签颜色
+	labelColor := color.RGBA{255, 255, 255, 255} // 默认白色
+	if svp.detector.runtimeConfig != nil && svp.detector.runtimeConfig.LabelColor != "" {
+		if parsedColor := svp.detector.parseColor(svp.detector.runtimeConfig.LabelColor); parsedColor != nil {
+			labelColor = *parsedColor
+		}
+	}
+
+	// 简单的文本绘制（使用像素点）
+	// 这里使用简化的文本渲染，实际项目中可以使用更复杂的字体库
+	for i, char := range label {
+		charX := x + i*(fontSize/2)
+		if charX >= 0 && charX < width-fontSize/2 && y >= 0 && y < height-fontSize {
+			// 简单的字符渲染（仅作示例）
+			for dy := 0; dy < fontSize; dy++ {
+				for dx := 0; dx < fontSize/2; dx++ {
+					px := charX + dx
+					py := y + dy
+					if px >= 0 && py >= 0 && px < width && py < height {
+						// 简单的字符模式（可以根据需要改进）
+						if (dy == 0 || dy == fontSize-1 || dx == 0 || dx == fontSize/2-1) && char != ' ' {
+							img.Set(px, py, labelColor)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 func loadImage(path string) (image.Image, error) {
 	file, err := os.Open(path)
 	if err != nil {
