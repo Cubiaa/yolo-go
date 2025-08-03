@@ -373,6 +373,11 @@ func DestroyEnvironment() {
 
 // DetectImage 检测单张图片
 func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
+	// 如果没有设置运行时配置，使用默认配置
+	if y.runtimeConfig == nil {
+		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
 	// 加载图像以获取原始尺寸
 	img, err := imaging.Open(imagePath)
 	if err != nil {
@@ -471,6 +476,11 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 
 // DetectAndSave 检测图片并保存结果
 func (y *YOLO) DetectAndSave(imagePath, outputPath string) ([]Detection, error) {
+	// 如果没有设置运行时配置，使用默认配置
+	if y.runtimeConfig == nil {
+		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
 	// 检测图片
 	detections, err := y.DetectImage(imagePath)
 	if err != nil {
@@ -499,6 +509,11 @@ func (y *YOLO) DetectAndSave(imagePath, outputPath string) ([]Detection, error) 
 
 // DetectVideo 检测视频文件（MP4等）
 func (y *YOLO) DetectVideo(inputPath string, showLive ...bool) ([]VideoDetectionResult, error) {
+	// 如果没有设置运行时配置，使用默认配置
+	if y.runtimeConfig == nil {
+		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
 	if !isVideoFile(inputPath) {
 		return nil, fmt.Errorf("不支持的文件格式，请使用MP4等视频文件")
 	}
@@ -517,6 +532,11 @@ func (y *YOLO) DetectVideo(inputPath string, showLive ...bool) ([]VideoDetection
 
 // DetectVideoAndSave 检测视频并保存结果
 func (y *YOLO) DetectVideoAndSave(inputPath, outputPath string, showLive ...bool) error {
+	// 如果没有设置运行时配置，使用默认配置
+	if y.runtimeConfig == nil {
+		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
 	if !isVideoFile(inputPath) {
 		return fmt.Errorf("不支持的文件格式，请使用MP4等视频文件")
 	}
@@ -552,6 +572,11 @@ func (y *YOLO) Show(inputPath string, outputPath ...string) error {
 
 // DetectVideoWithCallback 检测视频（使用回调处理每一帧）
 func (y *YOLO) DetectVideoWithCallback(inputPath string, callback func(VideoDetectionResult)) error {
+	// 如果没有设置运行时配置，使用默认配置
+	if y.runtimeConfig == nil {
+		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
 	if !isVideoFile(inputPath) {
 		return fmt.Errorf("不支持的文件格式，请使用MP4等视频文件")
 	}
@@ -762,14 +787,32 @@ func (y *YOLO) drawBBox(img draw.Image, bbox [4]float32, lineColor color.Color) 
 	x2 := int(max(0, min(float32(width-1), bbox[2])))
 	y2 := int(max(0, min(float32(height-1), bbox[3])))
 
-	// 画矩形框
-	for x := x1; x <= x2; x++ {
-		img.Set(x, y1, lineColor) // 上边
-		img.Set(x, y2, lineColor) // 下边
+	// 获取线条宽度
+	lineWidth := 1
+	if y.runtimeConfig != nil && y.runtimeConfig.LineWidth > 0 {
+		lineWidth = y.runtimeConfig.LineWidth
 	}
-	for y := y1; y <= y2; y++ {
-		img.Set(x1, y, lineColor) // 左边
-		img.Set(x2, y, lineColor) // 右边
+
+	// 画矩形框（支持自定义线条宽度）
+	for i := 0; i < lineWidth; i++ {
+		// 上边和下边
+		for x := x1; x <= x2; x++ {
+			if y1+i < height {
+				img.Set(x, y1+i, lineColor) // 上边
+			}
+			if y2-i >= 0 {
+				img.Set(x, y2-i, lineColor) // 下边
+			}
+		}
+		// 左边和右边
+		for y := y1; y <= y2; y++ {
+			if x1+i < width {
+				img.Set(x1+i, y, lineColor) // 左边
+			}
+			if x2-i >= 0 {
+				img.Set(x2-i, y, lineColor) // 右边
+			}
+		}
 	}
 }
 
@@ -794,8 +837,14 @@ func (y *YOLO) drawDetections(imagePath, outputPath string, detections []Detecti
 
 	origW, origH := bounds.Max.X, bounds.Max.Y
 
-	// 绘制检测框
-	red := color.RGBA{255, 0, 0, 255}
+	// 获取颜色配置
+	boxColor := color.RGBA{255, 0, 0, 255} // 默认红色
+	if y.runtimeConfig != nil && y.runtimeConfig.BoxColor != "" {
+		if parsedColor := y.parseColor(y.runtimeConfig.BoxColor); parsedColor != nil {
+			boxColor = *parsedColor
+		}
+	}
+
 	for _, detection := range detections {
 		// 检测结果坐标已经是原始图像坐标，无需再次缩放
 		x1 := max(0, detection.Box[0])
@@ -813,7 +862,7 @@ func (y *YOLO) drawDetections(imagePath, outputPath string, detections []Detecti
 
 		if drawBoxes {
 			// 画检测框
-			y.drawBBox(origImg, [4]float32{x1, y1, x2, y2}, red)
+			y.drawBBox(origImg, [4]float32{x1, y1, x2, y2}, boxColor)
 		}
 
 		if drawLabels {
@@ -857,8 +906,14 @@ func (y *YOLO) drawDetectionsOnImage(img image.Image, detections []Detection) im
 
 	origW, origH := bounds.Max.X, bounds.Max.Y
 
-	// 绘制检测框
-	red := color.RGBA{255, 0, 0, 255}
+	// 获取颜色配置
+	boxColor := color.RGBA{255, 0, 0, 255} // 默认红色
+	if y.runtimeConfig != nil && y.runtimeConfig.BoxColor != "" {
+		if parsedColor := y.parseColor(y.runtimeConfig.BoxColor); parsedColor != nil {
+			boxColor = *parsedColor
+		}
+	}
+
 	for _, detection := range detections {
 		// 检测结果坐标已经是原始图像坐标，无需再次缩放
 		x1 := max(0, detection.Box[0])
@@ -876,7 +931,7 @@ func (y *YOLO) drawDetectionsOnImage(img image.Image, detections []Detection) im
 
 		if drawBoxes {
 			// 画检测框
-			y.drawBBox(origImg, [4]float32{x1, y1, x2, y2}, red)
+			y.drawBBox(origImg, [4]float32{x1, y1, x2, y2}, boxColor)
 		}
 
 		if drawLabels {
@@ -893,10 +948,38 @@ func (y *YOLO) drawDetectionsOnImage(img image.Image, detections []Detection) im
 func (y *YOLO) drawLabel(img *image.RGBA, label string, x, yPos int) {
 	bounds := img.Bounds()
 
-	// 设置字体和尺寸
-	face := basicfont.Face7x13
-	textWidth := len(label) * 7
-	textHeight := 13
+	// 设置字体和尺寸（支持自定义字体大小）
+	var face font.Face
+	var charWidth, textHeight int
+	
+	// 根据FontSize选择合适的字体
+	if y.runtimeConfig != nil && y.runtimeConfig.FontSize > 0 {
+		switch {
+		case y.runtimeConfig.FontSize <= 10:
+			face = basicfont.Face7x13
+			charWidth = 7
+			textHeight = 13
+		case y.runtimeConfig.FontSize <= 15:
+			face = basicfont.Face7x13 // 可以考虑使用更大的字体
+			charWidth = 8
+			textHeight = 15
+		case y.runtimeConfig.FontSize <= 20:
+			face = basicfont.Face7x13
+			charWidth = 9
+			textHeight = 18
+		default:
+			face = basicfont.Face7x13
+			charWidth = 10
+			textHeight = 20
+		}
+	} else {
+		// 默认字体
+		face = basicfont.Face7x13
+		charWidth = 7
+		textHeight = 13
+	}
+	
+	textWidth := len(label) * charWidth
 	padding := 4
 
 	// 确保标签在图像范围内
@@ -928,7 +1011,15 @@ func (y *YOLO) drawLabel(img *image.RGBA, label string, x, yPos int) {
 		}
 	}
 
-	// 绘制白色文本
+	// 获取标签颜色配置
+	labelColor := color.RGBA{255, 255, 255, 255} // 默认白色
+	if y.runtimeConfig != nil && y.runtimeConfig.LabelColor != "" {
+		if parsedColor := y.parseColor(y.runtimeConfig.LabelColor); parsedColor != nil {
+			labelColor = *parsedColor
+		}
+	}
+
+	// 绘制文本
 	point := fixed.Point26_6{
 		X: fixed.Int26_6(x * 64),
 		Y: fixed.Int26_6((yPos + textHeight - 2) * 64), // 稍微向上调整
@@ -936,7 +1027,7 @@ func (y *YOLO) drawLabel(img *image.RGBA, label string, x, yPos int) {
 
 	d := &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(color.RGBA{255, 255, 255, 255}), // 纯白色文本
+		Src:  image.NewUniform(labelColor),
 		Face: face,
 		Dot:  point,
 	}
@@ -959,6 +1050,34 @@ func min(a, b float32) float32 {
 		return a
 	}
 	return b
+}
+
+// parseColor 解析颜色字符串
+func (y *YOLO) parseColor(colorStr string) *color.RGBA {
+	switch strings.ToLower(colorStr) {
+	case "red":
+		return &color.RGBA{255, 0, 0, 255}
+	case "green":
+		return &color.RGBA{0, 255, 0, 255}
+	case "blue":
+		return &color.RGBA{0, 0, 255, 255}
+	case "yellow":
+		return &color.RGBA{255, 255, 0, 255}
+	case "cyan":
+		return &color.RGBA{0, 255, 255, 255}
+	case "magenta":
+		return &color.RGBA{255, 0, 255, 255}
+	case "white":
+		return &color.RGBA{255, 255, 255, 255}
+	case "black":
+		return &color.RGBA{0, 0, 0, 255}
+	case "orange":
+		return &color.RGBA{255, 165, 0, 255}
+	case "purple":
+		return &color.RGBA{128, 0, 128, 255}
+	default:
+		return nil // 无法解析的颜色，返回nil使用默认颜色
+	}
 }
 
 // 便捷方法：从配置管理器创建YOLO
@@ -1131,6 +1250,11 @@ func ConvertFramesToVideo(framesDir, outputPath string, fps int) string {
 
 // detectImage 检测单张图像（内部方法）
 func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
+	// 如果没有设置运行时配置，使用默认配置
+	if y.runtimeConfig == nil {
+		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
 	// 获取原始图像尺寸
 	originalBounds := img.Bounds()
 	originalWidth := float32(originalBounds.Dx())
@@ -1253,6 +1377,11 @@ func (y *YOLO) preprocessImageFromMemory(img image.Image) ([]float32, error) {
 
 // ShowLive 实时播放视频并显示检测框
 func (y *YOLO) ShowLive(inputPath string) error {
+	// 如果没有设置运行时配置，使用默认配置
+	if y.runtimeConfig == nil {
+		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
 	if !isVideoFile(inputPath) {
 		return fmt.Errorf("不支持的文件格式，请使用MP4等视频文件")
 	}

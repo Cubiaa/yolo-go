@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
-	"yolo-go/gui"
-	"yolo-go/yolo"
+
+	"github.com/Cubiaa/yolo/gui"
+	"github.com/Cubiaa/yolo/yolo"
 )
 
 func main() {
