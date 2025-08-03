@@ -264,6 +264,11 @@ func (y *YOLO) Close() {
 	// 因为可能有其他检测器还在使用
 }
 
+// SetRuntimeConfig 设置运行时检测配置
+func (y *YOLO) SetRuntimeConfig(options *DetectionOptions) {
+	y.runtimeConfig = options
+}
+
 // DestroyEnvironment 销毁ONNX Runtime环境（在所有检测器都关闭后调用）
 func DestroyEnvironment() {
 	ortMutex.Lock()
@@ -276,6 +281,17 @@ func DestroyEnvironment() {
 
 // DetectImage 检测单张图片
 func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
+	// 加载图像以获取原始尺寸
+	img, err := imaging.Open(imagePath)
+	if err != nil {
+		return nil, fmt.Errorf("无法打开图像: %v", err)
+	}
+
+	// 获取原始图像尺寸
+	originalBounds := img.Bounds()
+	originalWidth := float32(originalBounds.Dx())
+	originalHeight := float32(originalBounds.Dy())
+
 	// 预处理图像
 	inputData, err := y.preprocessImage(imagePath)
 	if err != nil {
@@ -308,6 +324,17 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 	// 解析检测结果
 	detections := y.parseDetections(outputTensor.GetData(), outputTensor.GetShape())
 
+	// 将坐标从模型输入尺寸转换回原始图像尺寸
+	scaleX := originalWidth / float32(y.config.InputSize)
+	scaleY := originalHeight / float32(y.config.InputSize)
+	
+	for i := range detections {
+		detections[i].Box[0] *= scaleX // x1
+		detections[i].Box[1] *= scaleY // y1
+		detections[i].Box[2] *= scaleX // x2
+		detections[i].Box[3] *= scaleY // y2
+	}
+
 	// 应用非极大抑制
 	threshold := float32(0.5) // 默认值
 	if y.runtimeConfig != nil {
@@ -318,18 +345,7 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 	return keep, nil
 }
 
-// DetectImageResults 检测单张图片并返回DetectionResults
-func (y *YOLO) DetectImageResults(imagePath string) (*DetectionResults, error) {
-	detections, err := y.DetectImage(imagePath)
-	if err != nil {
-		return nil, err
-	}
-	return &DetectionResults{
-		Detections: detections,
-		InputPath:  imagePath,
-		detector:   y,
-	}, nil
-}
+
 
 // DetectAndSave 检测图片并保存结果
 func (y *YOLO) DetectAndSave(imagePath, outputPath string) ([]Detection, error) {
@@ -357,19 +373,7 @@ func (y *YOLO) DetectAndSave(imagePath, outputPath string) ([]Detection, error) 
 	return detections, nil
 }
 
-// DetectImg 检测图像（推荐使用）
-func (y *YOLO) DetectImg(imagePath string) ([]Detection, error) {
-	results, err := y.Detect(imagePath)
-	if err != nil {
-		return nil, err
-	}
-	return results.Detections, nil
-}
 
-// DetectImgAndSave 检测图像并保存结果（推荐使用）
-func (y *YOLO) DetectImgAndSave(imagePath, outputPath string) ([]Detection, error) {
-	return y.DetectAndSave(imagePath, outputPath)
-}
 
 // DetectVideo 检测视频文件（MP4等）
 func (y *YOLO) DetectVideo(inputPath string, showLive ...bool) ([]VideoDetectionResult, error) {
@@ -419,7 +423,7 @@ func (y *YOLO) Show(inputPath string, outputPath ...string) error {
 			return fmt.Errorf("图片需要指定输出路径")
 		}
 		fmt.Printf("📸 可视化图片: %s -> %s\n", inputPath, outputPath[0])
-		_, err := y.DetectImgAndSave(inputPath, outputPath[0])
+		_, err := y.DetectAndSave(inputPath, outputPath[0])
 		return err
 	}
 }
@@ -539,7 +543,13 @@ func (y *YOLO) parseDetections(outputData []float32, outputShape []int64) []Dete
 			}
 		}
 
-		if bestScore < 0.5 { // Changed from y.config.ConfThreshold to 0.5
+		// 使用配置的置信度阈值
+		confThreshold := float32(0.5) // 默认值
+		if y.runtimeConfig != nil {
+			confThreshold = y.runtimeConfig.ConfThreshold
+		}
+
+		if bestScore < confThreshold {
 			continue
 		}
 
@@ -654,17 +664,15 @@ func (y *YOLO) drawDetections(imagePath, outputPath string, detections []Detecti
 	draw.Draw(origImg, bounds, img, bounds.Min, draw.Src)
 
 	origW, origH := bounds.Max.X, bounds.Max.Y
-	scaleX := float32(origW) / float32(y.config.InputSize)
-	scaleY := float32(origH) / float32(y.config.InputSize)
 
 	// 绘制检测框
 	red := color.RGBA{255, 0, 0, 255}
 	for _, detection := range detections {
-		// 缩放坐标到原始图像尺寸
-		x1 := max(0, detection.Box[0]*scaleX)
-		y1 := max(0, detection.Box[1]*scaleY)
-		x2 := min(float32(origW), detection.Box[2]*scaleX)
-		y2 := min(float32(origH), detection.Box[3]*scaleY)
+		// 检测结果坐标已经是原始图像坐标，无需再次缩放
+		x1 := max(0, detection.Box[0])
+		y1 := max(0, detection.Box[1])
+		x2 := min(float32(origW), detection.Box[2])
+		y2 := min(float32(origH), detection.Box[3])
 
 		// 检查是否应该画框和标签
 		drawBoxes := true
@@ -719,17 +727,15 @@ func (y *YOLO) drawDetectionsOnImage(img image.Image, detections []Detection) im
 	draw.Draw(origImg, bounds, img, bounds.Min, draw.Src)
 
 	origW, origH := bounds.Max.X, bounds.Max.Y
-	scaleX := float32(origW) / float32(y.config.InputSize)
-	scaleY := float32(origH) / float32(y.config.InputSize)
 
 	// 绘制检测框
 	red := color.RGBA{255, 0, 0, 255}
 	for _, detection := range detections {
-		// 缩放坐标到原始图像尺寸
-		x1 := max(0, detection.Box[0]*scaleX)
-		y1 := max(0, detection.Box[1]*scaleY)
-		x2 := min(float32(origW), detection.Box[2]*scaleX)
-		y2 := min(float32(origH), detection.Box[3]*scaleY)
+		// 检测结果坐标已经是原始图像坐标，无需再次缩放
+		x1 := max(0, detection.Box[0])
+		y1 := max(0, detection.Box[1])
+		x2 := min(float32(origW), detection.Box[2])
+		y2 := min(float32(origH), detection.Box[3])
 
 		// 检查是否应该画框和标签
 		drawBoxes := true
@@ -959,6 +965,11 @@ func ConvertFramesToVideo(framesDir, outputPath string, fps int) string {
 
 // detectImage 检测单张图像（内部方法）
 func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
+	// 获取原始图像尺寸
+	originalBounds := img.Bounds()
+	originalWidth := float32(originalBounds.Dx())
+	originalHeight := float32(originalBounds.Dy())
+
 	// 预处理图像
 	inputData, err := y.preprocessImageFromMemory(img)
 	if err != nil {
@@ -990,6 +1001,17 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 
 	// 解析检测结果
 	detections := y.parseDetections(outputTensor.GetData(), outputTensor.GetShape())
+
+	// 将坐标从模型输入尺寸转换回原始图像尺寸
+	scaleX := originalWidth / float32(y.config.InputSize)
+	scaleY := originalHeight / float32(y.config.InputSize)
+	
+	for i := range detections {
+		detections[i].Box[0] *= scaleX // x1
+		detections[i].Box[1] *= scaleY // y1
+		detections[i].Box[2] *= scaleX // x2
+		detections[i].Box[3] *= scaleY // y2
+	}
 
 	// 应用非极大抑制
 	threshold := float32(0.5) // 默认值
@@ -1142,44 +1164,10 @@ func StartLiveGUI(detector *YOLO, videoPath string, options *DetectionOptions) e
 }
 
 // Save 保存检测结果到指定路径
-func (y *YOLO) Save(outputPath string) error {
-	if y.lastDetections == nil || len(y.lastDetections.Detections) == 0 {
-		return fmt.Errorf("没有检测结果可保存，请先调用 Detect() 方法")
-	}
-
-	if y.lastInputPath == "" {
-		return fmt.Errorf("没有输入文件路径信息")
-	}
-
-	if isVideoFile(y.lastInputPath) {
-		// 视频：保存带检测框的视频
-		return y.DetectVideoAndSave(y.lastInputPath, outputPath)
-	} else {
-		// 图片：保存带检测框的图片
-		_, err := y.DetectAndSave(y.lastInputPath, outputPath)
-		return err
-	}
-}
-
-// SaveDetections 保存检测结果到指定路径
-func (y *YOLO) SaveDetections(detections []Detection, outputPath string) error {
-	if len(detections) == 0 {
-		return fmt.Errorf("没有检测结果可保存")
-	}
-
-	// 这里需要根据检测结果的类型来决定如何保存
-	// 暂时使用默认的保存逻辑
-	if y.lastInputPath != "" && isVideoFile(y.lastInputPath) {
-		return y.DetectVideoAndSave(y.lastInputPath, outputPath)
-	} else {
-		// 对于图片，我们需要重新检测并保存
-		if y.lastInputPath != "" {
-			_, err := y.DetectAndSave(y.lastInputPath, outputPath)
-			return err
-		}
-		return fmt.Errorf("无法确定输入文件类型")
-	}
-}
+// 注意：YOLO.Save() 和 YOLO.SaveDetections() 方法已被移除
+// 请使用 DetectionResults.Save() 方法：
+//   result, err := detector.Detect("input.jpg")
+//   err = result.Save("output.jpg")
 
 // Detect 检测并返回结果（不保存）
 func (y *YOLO) Detect(inputPath string, options ...*DetectionOptions) (*DetectionResults, error) {
@@ -1255,28 +1243,29 @@ func (y *YOLO) Detect(inputPath string, options ...*DetectionOptions) (*Detectio
 func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions) (*DetectionResults, error) {
 	fmt.Printf("📹 从摄像头检测: %s\n", device)
 
-	// 创建摄像头输入源
-	input := NewCameraInput(device)
-	if err := input.Validate(); err != nil {
-		return nil, fmt.Errorf("摄像头输入验证失败: %v", err)
-	}
-
 	// 设置运行时配置
 	y.runtimeConfig = options
 
-	// 使用Vidio处理摄像头流
-	processor := NewVidioVideoProcessor(y)
+	// 使用CameraVideoProcessor处理摄像头流
+	processor := NewCameraVideoProcessor(y, device)
 
 	var allDetections []Detection
 	var frameCount int
 
 	// 处理摄像头流
-	err := processor.ProcessVideoWithCallback(input.GetFFmpegInput(), func(result VideoDetectionResult) {
+	err := processor.ProcessCameraWithCallback(func(img image.Image, detections []Detection, err error) {
+		if err != nil {
+			fmt.Printf("摄像头检测错误: %v\n", err)
+			return
+		}
+		
 		frameCount++
-		allDetections = append(allDetections, result.Detections...)
+		allDetections = append(allDetections, detections...)
 
 		// 实时更新状态
-		fmt.Printf("📊 摄像头帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
+		fmt.Printf("📊 摄像头帧 %d, 检测到 %d 个对象\n", frameCount, len(detections))
+		
+
 	})
 
 	if err != nil {
@@ -1284,10 +1273,10 @@ func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions) (*Dete
 	}
 
 	// 保存状态
-	y.lastInputPath = input.Path
+	y.lastInputPath = device
 	y.lastDetections = &DetectionResults{
 		Detections: allDetections,
-		InputPath:  input.Path,
+		InputPath:  device,
 		detector:   y,
 	}
 

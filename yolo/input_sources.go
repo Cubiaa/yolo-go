@@ -29,7 +29,10 @@ func NewCameraInput(device string) *InputSource {
 		Type: "camera",
 		Path: actualDevice,
 		Options: map[string]string{
-			"f": "30", // 帧率
+			"f":           "dshow",     // Windows DirectShow
+			"framerate":   "30",       // 帧率
+			"video_size":  "640x480",  // 视频尺寸
+			"pixel_format": "yuyv422", // 像素格式
 		},
 	}
 }
@@ -191,6 +194,15 @@ func (is *InputSource) GetFFmpegInput() string {
 	case "file":
 		return is.Path
 	case "camera":
+		// 检查是否已经包含video=前缀，避免重复添加
+		if strings.HasPrefix(is.Path, "video=") {
+			return is.Path
+		}
+		// 检查是否为Linux设备路径
+		if strings.HasPrefix(is.Path, "/dev/video") {
+			return is.Path
+		}
+		// 对于纯数字索引，添加video=前缀
 		return fmt.Sprintf("video=%s", is.Path)
 	case "rtsp":
 		return is.Path
@@ -230,9 +242,27 @@ func (is *InputSource) Validate() error {
 		}
 	case "camera":
 		// 摄像头验证
+		if is.Path == "" {
+			return fmt.Errorf("摄像头设备路径不能为空")
+		}
+		// 检查常见的摄像头设备格式
+		validFormats := []string{"video=", "/dev/video", "0", "1", "2", "3", "4"}
+		isValid := false
+		for _, format := range validFormats {
+			if strings.HasPrefix(is.Path, format) || is.Path == format {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return fmt.Errorf("不支持的摄像头设备格式: %s，支持的格式: video=0, /dev/video0, 0, 1, 2等", is.Path)
+		}
 		return nil
 	case "rtsp", "rtmp":
 		// 网络流验证
+		if !strings.HasPrefix(is.Path, "rtsp://") && !strings.HasPrefix(is.Path, "rtmp://") {
+			return fmt.Errorf("无效的流URL格式: %s", is.Path)
+		}
 		return nil
 	case "screen":
 		// 屏幕录制验证

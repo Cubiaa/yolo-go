@@ -11,12 +11,22 @@ import (
 // VidioVideoProcessor 使用Vidio库的视频处理器
 type VidioVideoProcessor struct {
 	detector *YOLO
+	options  *DetectionOptions // 检测配置选项
 }
 
 // NewVidioVideoProcessor 创建Vidio视频处理器
 func NewVidioVideoProcessor(detector *YOLO) *VidioVideoProcessor {
 	return &VidioVideoProcessor{
 		detector: detector,
+		options:  nil, // 使用检测器的当前配置
+	}
+}
+
+// NewVidioVideoProcessorWithOptions 创建带配置选项的Vidio视频处理器
+func NewVidioVideoProcessorWithOptions(detector *YOLO, options *DetectionOptions) *VidioVideoProcessor {
+	return &VidioVideoProcessor{
+		detector: detector,
+		options:  options,
 	}
 }
 
@@ -43,7 +53,15 @@ func (vp *VidioVideoProcessor) ProcessVideo(inputPath string) ([]VideoDetectionR
 		frameImg := convertFrameBufferToImage(video.FrameBuffer(), video.Width(), video.Height())
 
 		// YOLO检测
-		detections, err := vp.detector.detectImage(frameImg)
+		var detections []Detection
+		var err error
+		
+		if vp.options != nil {
+			// 使用指定的检测选项
+			vp.detector.SetRuntimeConfig(vp.options)
+		}
+		
+		detections, err = vp.detector.detectImage(frameImg)
 		if err != nil {
 			fmt.Printf("⚠️  帧 %d 检测失败: %v\n", frameCount, err)
 			detections = []Detection{}
@@ -91,7 +109,15 @@ func (vp *VidioVideoProcessor) ProcessVideoWithCallback(inputPath string, callba
 		frameImg := convertFrameBufferToImage(video.FrameBuffer(), video.Width(), video.Height())
 
 		// YOLO检测
-		detections, err := vp.detector.detectImage(frameImg)
+		var detections []Detection
+		var err error
+		
+		if vp.options != nil {
+			// 使用指定的检测选项
+			vp.detector.SetRuntimeConfig(vp.options)
+		}
+		
+		detections, err = vp.detector.detectImage(frameImg)
 		if err != nil {
 			detections = []Detection{}
 		}

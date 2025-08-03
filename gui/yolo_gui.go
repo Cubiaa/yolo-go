@@ -109,11 +109,11 @@ func NewYOLOLiveWindow(detector *yolo.YOLO, inputType string, inputPath string, 
 		showFPS:       options.ShowFPS,
 		stopChan:      make(chan bool),
 
-		// 性能配置 - 默认平衡模式
-		performanceMode: "balanced",
-		frameSkip:       2,
-		maxImageWidth:   800,
-		maxImageHeight:  600,
+		// 性能配置 - 针对高性能CPU优化
+		performanceMode: "fast",
+		frameSkip:       1, // 减少跳帧以提高流畅度
+		maxImageWidth:   1024,
+		maxImageHeight:  768,
 	}
 
 	window.createWindow()
@@ -223,6 +223,13 @@ func (live *YOLOLiveWindow) createWindow() {
 	live.statusLabel = widget.NewLabel("准备自动播放...")
 	live.fpsLabel = widget.NewLabel("FPS: 0")
 
+	// 创建性能模式选择
+	performanceSelect := widget.NewSelect([]string{"fast", "balanced", "accurate"}, func(value string) {
+		live.performanceMode = value
+		live.statusLabel.SetText(fmt.Sprintf("性能模式: %s", value))
+	})
+	performanceSelect.SetSelected(live.performanceMode)
+
 	// 创建控制按钮
 	playBtn := widget.NewButton("播放", live.startPlayback)
 	stopBtn := widget.NewButton("停止", live.stopPlayback)
@@ -231,7 +238,7 @@ func (live *YOLOLiveWindow) createWindow() {
 	deviceInfo := widget.NewLabel(fmt.Sprintf("设备: %s", live.inputSource.Path))
 
 	// 创建布局
-	controls := container.NewHBox(playBtn, stopBtn, live.statusLabel, live.fpsLabel)
+	controls := container.NewHBox(playBtn, stopBtn, widget.NewLabel("性能模式:"), performanceSelect, live.statusLabel, live.fpsLabel)
 	infoPanel := container.NewHBox(deviceInfo)
 	content := container.NewVBox(live.imageDisplay, controls, infoPanel)
 
@@ -273,114 +280,201 @@ func (live *YOLOLiveWindow) stopPlayback() {
 
 // processVideo 处理视频
 func (live *YOLOLiveWindow) processVideo() {
-	// 使用Vidio处理视频
-	processor := yolo.NewVidioVideoProcessor(live.detector)
+	// 设置检测器的运行时配置，确保使用正确的置信度和IOU阈值
+	detectionOptions := &yolo.DetectionOptions{
+		ConfThreshold: float32(live.confThreshold),
+		IOUThreshold:  float32(live.iouThreshold),
+		DrawBoxes:     live.drawBoxes,
+		DrawLabels:    live.drawLabels,
+		ShowFPS:       live.showFPS,
+		BoxColor:      live.boxColor,
+		LabelColor:    live.labelColor,
+		LineWidth:     live.lineWidth,
+		FontSize:      live.fontSize,
+	}
+	
+	// 将配置设置到检测器中
+	live.detector.SetRuntimeConfig(detectionOptions)
 
-	// 根据性能模式设置参数
+	// 根据性能模式设置参数（针对高性能CPU优化）
 	switch live.performanceMode {
 	case "fast":
-		live.frameSkip = 3
-		live.maxImageWidth = 640
-		live.maxImageHeight = 480
-	case "balanced":
-		live.frameSkip = 2
-		live.maxImageWidth = 800
-		live.maxImageHeight = 600
-	case "accurate":
-		live.frameSkip = 1
+		live.frameSkip = 1 // 高性能CPU可以处理更多帧
 		live.maxImageWidth = 1024
 		live.maxImageHeight = 768
+	case "balanced":
+		live.frameSkip = 1
+		live.maxImageWidth = 1280
+		live.maxImageHeight = 720
+	case "accurate":
+		live.frameSkip = 1
+		live.maxImageWidth = 1920
+		live.maxImageHeight = 1080
 	}
 
 	frameCount := 0
 
-	// 使用输入源的FFmpeg参数
-	inputPath := live.inputSource.GetFFmpegInput()
-
-	err := processor.ProcessVideoWithCallback(inputPath, func(result yolo.VideoDetectionResult) {
-		if !live.isPlaying {
-			return
-		}
-
-		frameCount++
-
-		// 跳帧处理以提高性能
-		if frameCount%live.frameSkip != 0 {
-			return
-		}
-
-		live.frameCount++
-
-		// 计算FPS
-		elapsed := time.Since(live.startTime).Seconds()
-		if elapsed > 0 {
-			live.fps = float64(live.frameCount) / elapsed
-		}
-
-		// 使用fyne.Do在主线程中更新UI
-		fyne.Do(func() {
-			// 更新FPS显示
-			if live.showFPS {
-				live.fpsLabel.SetText(fmt.Sprintf("FPS: %.1f", live.fps))
+	// 根据输入类型选择合适的处理器
+	if live.inputSource.Type == "camera" {
+		// 使用专门的摄像头处理器
+		cameraProcessor := yolo.NewCameraVideoProcessor(live.detector, live.inputSource.Path)
+		
+		err := cameraProcessor.ProcessCameraWithCallback(func(img image.Image, detections []yolo.Detection, err error) {
+			if err != nil {
+				fyne.Do(func() {
+					live.statusLabel.SetText(fmt.Sprintf("摄像头错误: %v", err))
+				})
+				return
+			}
+			
+			if !live.isPlaying {
+				return
 			}
 
-			// 如果有图像数据，显示它
-			if result.Image != nil {
+			frameCount++
+
+			// 跳帧处理以提高性能
+			if frameCount%live.frameSkip != 0 {
+				return
+			}
+
+			live.frameCount++
+
+			// 计算FPS
+			elapsed := time.Since(live.startTime).Seconds()
+			if elapsed > 0 {
+				live.fps = float64(live.frameCount) / elapsed
+			}
+
+			// 使用fyne.Do在主线程中更新UI
+			fyne.Do(func() {
+				// 更新FPS显示
+				if live.showFPS {
+					live.fpsLabel.SetText(fmt.Sprintf("FPS: %.1f", live.fps))
+				}
+
 				// 在图像上绘制检测结果
-				processedImage := live.drawDetectionsOnImage(result.Image, result.Detections)
+				processedImage := live.drawDetectionsOnImage(img, detections)
 
 				// 更新显示
 				live.imageDisplay.Image = processedImage
 				live.imageDisplay.Refresh()
+
+				// 更新状态
+				live.statusLabel.SetText(fmt.Sprintf("摄像头帧: %d, 检测: %d", live.frameCount, len(detections)))
+			})
+
+			// 控制播放速度
+			time.Sleep(33 * time.Millisecond) // 约30 FPS
+		})
+		
+		if err != nil {
+			fyne.Do(func() {
+				live.statusLabel.SetText(fmt.Sprintf("摄像头处理失败: %v", err))
+			})
+		}
+	} else {
+		// 使用原有的视频处理器处理文件、RTSP、RTMP等
+		processor := yolo.NewVidioVideoProcessorWithOptions(live.detector, detectionOptions)
+		inputPath := live.inputSource.GetFFmpegInput()
+
+		err := processor.ProcessVideoWithCallback(inputPath, func(result yolo.VideoDetectionResult) {
+			if !live.isPlaying {
+				return
 			}
 
-			// 更新状态
-			live.statusLabel.SetText(fmt.Sprintf("帧: %d, 检测: %d", live.frameCount, len(result.Detections)))
+			frameCount++
+
+			// 跳帧处理以提高性能
+			if frameCount%live.frameSkip != 0 {
+				return
+			}
+
+			live.frameCount++
+
+			// 计算FPS
+			elapsed := time.Since(live.startTime).Seconds()
+			if elapsed > 0 {
+				live.fps = float64(live.frameCount) / elapsed
+			}
+
+			// 使用fyne.Do在主线程中更新UI
+			fyne.Do(func() {
+				// 更新FPS显示
+				if live.showFPS {
+					live.fpsLabel.SetText(fmt.Sprintf("FPS: %.1f", live.fps))
+				}
+
+				// 如果有图像数据，显示它
+				if result.Image != nil {
+					// 在图像上绘制检测结果
+					processedImage := live.drawDetectionsOnImage(result.Image, result.Detections)
+
+					// 更新显示
+					live.imageDisplay.Image = processedImage
+					live.imageDisplay.Refresh()
+				}
+
+				// 更新状态
+				live.statusLabel.SetText(fmt.Sprintf("帧: %d, 检测: %d", live.frameCount, len(result.Detections)))
+			})
+
+			// 控制播放速度 - 针对高性能CPU优化
+			time.Sleep(8 * time.Millisecond) // 约120 FPS，更流畅
 		})
 
-		// 控制播放速度 - 减少延迟
-		time.Sleep(16 * time.Millisecond) // 约60 FPS
-	})
-
-	if err != nil {
-		fyne.Do(func() {
-			live.statusLabel.SetText(fmt.Sprintf("处理失败: %v", err))
-		})
+		if err != nil {
+			fyne.Do(func() {
+				live.statusLabel.SetText(fmt.Sprintf("处理失败: %v", err))
+			})
+		}
 	}
 }
 
 // drawDetectionsOnImage 在图像上绘制检测结果
 func (live *YOLOLiveWindow) drawDetectionsOnImage(img image.Image, detections []yolo.Detection) image.Image {
+	// 获取原始图像尺寸
+	originalBounds := img.Bounds()
+	originalWidth := float32(originalBounds.Dx())
+	originalHeight := float32(originalBounds.Dy())
+	
 	// 性能优化：缩放图像以提高处理速度
-	// 如果图像太大，先缩放到合适大小
-	bounds := img.Bounds()
-	if bounds.Dx() > live.maxImageWidth || bounds.Dy() > live.maxImageHeight {
+	var scale float32 = 1.0
+	if originalBounds.Dx() > live.maxImageWidth || originalBounds.Dy() > live.maxImageHeight {
 		// 计算缩放比例
-		scaleX := float64(live.maxImageWidth) / float64(bounds.Dx())
-		scaleY := float64(live.maxImageHeight) / float64(bounds.Dy())
-		scale := scaleX
+		scaleX := float32(live.maxImageWidth) / originalWidth
+		scaleY := float32(live.maxImageHeight) / originalHeight
+		scale = scaleX
 		if scaleY < scaleX {
 			scale = scaleY
 		}
 
 		// 缩放图像
-		newWidth := int(float64(bounds.Dx()) * scale)
-		newHeight := int(float64(bounds.Dy()) * scale)
+		newWidth := int(originalWidth * scale)
+		newHeight := int(originalHeight * scale)
 		img = imaging.Resize(img, newWidth, newHeight, imaging.Lanczos)
-		bounds = img.Bounds()
 	}
 
 	// 转换为RGBA
+	bounds := img.Bounds()
 	result := image.NewRGBA(bounds)
 	draw.Draw(result, bounds, img, bounds.Min, draw.Src)
 
-	// 绘制检测框和标签
+	// 绘制检测框和标签（需要根据缩放比例调整坐标）
 	for _, detection := range detections {
+		// 调整检测框坐标以匹配缩放后的图像
+		scaledBox := [4]float32{
+			detection.Box[0] * scale, // x1
+			detection.Box[1] * scale, // y1
+			detection.Box[2] * scale, // x2
+			detection.Box[3] * scale, // y2
+		}
+		
 		if live.drawBoxes {
-			live.drawBox(result, detection.Box, live.getColor(live.boxColor))
+			live.drawBox(result, scaledBox, live.getColor(live.boxColor))
 		}
 		if live.drawLabels {
-			live.drawLabel(result, detection.Class, detection.Score, detection.Box)
+			live.drawLabel(result, detection.Class, detection.Score, scaledBox)
 		}
 	}
 
