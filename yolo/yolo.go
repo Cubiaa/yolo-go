@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -120,6 +121,9 @@ type YOLO struct {
 	lastInputPath  string
 	lastDetections *DetectionResults
 	lastImage      image.Image
+	// 模型信息
+	modelInputShape  []int64  // 模型实际输入形状
+	modelOutputShape []int64  // 模型实际输出形状
 }
 
 // NewYOLO 创建新的YOLO检测器（配置文件必须，YOLOConfig可选）
@@ -188,6 +192,46 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 		return nil, fmt.Errorf("无法创建会话选项: %v", err)
 	}
 
+	// 设置会话选项以提升性能
+	// 根据CPU核心数动态调整线程数
+	numCPU := runtime.NumCPU()
+	optimalThreads := numCPU
+	if numCPU > 8 {
+		// 对于高核心数CPU，使用75%的核心以避免过度竞争
+		optimalThreads = int(float64(numCPU) * 0.75)
+	}
+	if optimalThreads < 1 {
+		optimalThreads = 1
+	}
+
+	fmt.Printf("💻 检测到 %d 个CPU核心，使用 %d 个线程进行优化\n", numCPU, optimalThreads)
+
+	err = sessionOptions.SetIntraOpNumThreads(optimalThreads)
+	if err != nil {
+		fmt.Printf("⚠️  设置线程数失败: %v\n", err)
+	}
+
+	err = sessionOptions.SetInterOpNumThreads(optimalThreads)
+	if err != nil {
+		fmt.Printf("⚠️  设置操作间线程数失败: %v\n", err)
+	}
+
+	// 设置图优化级别以提升性能
+	err = sessionOptions.SetGraphOptimizationLevel(ort.GraphOptimizationLevelEnableAll)
+	if err != nil {
+		fmt.Printf("⚠️  设置图优化级别失败: %v\n", err)
+	} else {
+		fmt.Println("⚡ 启用所有图优化以提升性能")
+	}
+
+	// 设置执行模式为并行以提升性能
+	err = sessionOptions.SetExecutionMode(ort.ExecutionModeParallel)
+	if err != nil {
+		fmt.Printf("⚠️  设置并行执行模式失败: %v\n", err)
+	} else {
+		fmt.Println("🔄 启用并行执行模式")
+	}
+
 	// 如果启用GPU，设置CUDA提供者
 	if yoloConfig.UseGPU {
 		fmt.Println("🚀 尝试启用GPU加速...")
@@ -202,7 +246,23 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 			}()
 
 			// 尝试添加CUDA执行提供者
-			err := sessionOptions.AppendExecutionProviderCUDA(nil)
+			cudaOptions, err := ort.NewCUDAProviderOptions()
+			if err != nil {
+				fmt.Printf("⚠️  创建CUDA选项失败: %v\n", err)
+			} else {
+				defer cudaOptions.Destroy()
+				
+				// 设置CUDA选项
+				optionsMap := map[string]string{
+					"device_id": fmt.Sprintf("%d", yoloConfig.GPUDeviceID),
+				}
+				err = cudaOptions.Update(optionsMap)
+				if err != nil {
+					fmt.Printf("⚠️  更新CUDA选项失败: %v\n", err)
+				} else {
+					err = sessionOptions.AppendExecutionProviderCUDA(cudaOptions)
+				}
+			}
 			if err != nil {
 				fmt.Printf("⚠️  CUDA不可用: %v\n", err)
 
@@ -216,7 +276,7 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 						}
 					}()
 
-					err2 := sessionOptions.AppendExecutionProviderDirectML(0)
+					err2 := sessionOptions.AppendExecutionProviderDirectML(yoloConfig.GPUDeviceID)
 					if err2 != nil {
 						fmt.Printf("⚠️  DirectML不可用: %v\n", err2)
 						fmt.Println("📋 GPU加速失败，将使用CPU")
@@ -244,9 +304,41 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 		return nil, fmt.Errorf("无法加载模型文件 '%s': %v", modelPath, err)
 	}
 
+	// 获取模型输入输出信息
+	inputInfos, outputInfos, err := ort.GetInputOutputInfo(modelPath)
+	if err != nil {
+		session.Destroy()
+		return nil, fmt.Errorf("无法获取模型输入输出信息: %v", err)
+	}
+	if len(inputInfos) == 0 || len(outputInfos) == 0 {
+		session.Destroy()
+		return nil, fmt.Errorf("模型输入或输出信息为空")
+	}
+	
+	// 注意：InputOutputInfo结构体在onnxruntime_go v1.21.0中没有GetShape()方法
+	// 我们使用默认的输入输出形状，或者从配置中获取
+	var modelInputShape, modelOutputShape []int64
+	
+	// 根据配置设置输入形状
+	if yoloConfig.InputWidth > 0 && yoloConfig.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		modelInputShape = []int64{1, 3, int64(yoloConfig.InputHeight), int64(yoloConfig.InputWidth)}
+		fmt.Printf("📊 使用自定义输入形状 (宽x高): %dx%d -> %v\n", yoloConfig.InputWidth, yoloConfig.InputHeight, modelInputShape)
+	} else {
+		// 使用正方形输入尺寸
+		modelInputShape = []int64{1, 3, int64(yoloConfig.InputSize), int64(yoloConfig.InputSize)}
+		fmt.Printf("📊 使用正方形输入形状: %dx%d -> %v\n", yoloConfig.InputSize, yoloConfig.InputSize, modelInputShape)
+	}
+	
+	// 输出形状通常在运行时确定，这里设置一个占位符
+	modelOutputShape = []int64{1, -1, -1} // -1 表示动态维度
+	fmt.Printf("📊 输出形状: %v (动态)\n", modelOutputShape)
+
 	return &YOLO{
-		config:  yoloConfig,
-		session: session,
+		config:           yoloConfig,
+		session:          session,
+		modelInputShape:  modelInputShape,
+		modelOutputShape: modelOutputShape,
 	}, nil
 }
 
@@ -299,16 +391,38 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 	}
 
 	// 创建输入张量
-	inputShape := ort.NewShape(1, 3, int64(y.config.InputSize), int64(y.config.InputSize))
+	var inputShape ort.Shape
+	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		inputShape = ort.NewShape(1, 3, int64(y.config.InputHeight), int64(y.config.InputWidth))
+	} else {
+		// 使用正方形输入尺寸
+		inputShape = ort.NewShape(1, 3, int64(y.config.InputSize), int64(y.config.InputSize))
+	}
 	inputTensor, err := ort.NewTensor(inputShape, inputData)
 	if err != nil {
 		return nil, fmt.Errorf("无法创建输入张量: %v", err)
 	}
 	defer inputTensor.Destroy()
 
-	// 创建输出张量
-	outputShape := ort.NewShape(1, 84, 8400)
-	outputData := make([]float32, 1*84*8400)
+	// 创建输出张量（使用动态形状）
+	var outputShape ort.Shape
+	var outputDataSize int
+	if len(y.modelOutputShape) >= 3 {
+		// 使用模型的实际输出形状
+		outputShape = ort.NewShape(y.modelOutputShape...)
+		outputDataSize = 1
+		for _, dim := range y.modelOutputShape {
+			outputDataSize *= int(dim)
+		}
+		fmt.Printf("🔧 使用动态输出形状: %v (数据大小: %d)\n", y.modelOutputShape, outputDataSize)
+	} else {
+		// 回退到默认形状
+		outputShape = ort.NewShape(1, 84, 8400)
+		outputDataSize = 1 * 84 * 8400
+		fmt.Println("⚠️  使用默认输出形状: [1, 84, 8400]")
+	}
+	outputData := make([]float32, outputDataSize)
 	outputTensor, err := ort.NewTensor(outputShape, outputData)
 	if err != nil {
 		return nil, fmt.Errorf("无法创建输出张量: %v", err)
@@ -325,8 +439,16 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 	detections := y.parseDetections(outputTensor.GetData(), outputTensor.GetShape())
 
 	// 将坐标从模型输入尺寸转换回原始图像尺寸
-	scaleX := originalWidth / float32(y.config.InputSize)
-	scaleY := originalHeight / float32(y.config.InputSize)
+	var scaleX, scaleY float32
+	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		scaleX = originalWidth / float32(y.config.InputWidth)
+		scaleY = originalHeight / float32(y.config.InputHeight)
+	} else {
+		// 使用正方形输入尺寸
+		scaleX = originalWidth / float32(y.config.InputSize)
+		scaleY = originalHeight / float32(y.config.InputSize)
+	}
 	
 	for i := range detections {
 		detections[i].Box[0] *= scaleX // x1
@@ -489,8 +611,15 @@ func (y *YOLO) preprocessImage(imagePath string) ([]float32, error) {
 		return nil, fmt.Errorf("无法解码图像: %v", err)
 	}
 
-	// 调整大小
-	resized := imaging.Resize(img, y.config.InputSize, y.config.InputSize, imaging.Lanczos)
+	// 根据配置调整大小
+	var resized image.Image
+	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		resized = imaging.Resize(img, y.config.InputWidth, y.config.InputHeight, imaging.Lanczos)
+	} else {
+		// 使用正方形输入尺寸
+		resized = imaging.Resize(img, y.config.InputSize, y.config.InputSize, imaging.Lanczos)
+	}
 
 	// 转换为RGB并归一化
 	bounds := resized.Bounds()
@@ -871,6 +1000,32 @@ func (y *YOLO) GetVideoProcessor() *VidioVideoProcessor {
 	return NewVidioVideoProcessor(y)
 }
 
+// IsGPUAvailable 检测GPU是否可用
+func IsGPUAvailable() bool {
+	// 创建临时会话选项来测试GPU支持
+	sessionOptions, err := ort.NewSessionOptions()
+	if err != nil {
+		return false
+	}
+	defer sessionOptions.Destroy()
+
+	// 测试CUDA
+	err = sessionOptions.AppendExecutionProviderCUDA(nil)
+	if err == nil {
+		return true
+	}
+
+	// 测试DirectML
+	sessionOptions2, err := ort.NewSessionOptions()
+	if err != nil {
+		return false
+	}
+	defer sessionOptions2.Destroy()
+
+	err = sessionOptions2.AppendExecutionProviderDirectML(0)
+	return err == nil
+}
+
 // CheckGPUSupport 检查GPU支持情况
 func CheckGPUSupport() {
 	fmt.Println("=== GPU支持检查 ===")
@@ -938,6 +1093,17 @@ func GetGPUConfig() *YOLOConfig {
 	return DefaultConfig().WithGPU(true).WithLibraryPath("")
 }
 
+// GetOptimalConfig 根据系统自动选择最优配置
+func GetOptimalConfig() *YOLOConfig {
+	if IsGPUAvailable() {
+		fmt.Println("🚀 检测到GPU支持，使用GPU配置")
+		return GetGPUConfig()
+	} else {
+		fmt.Println("💻 未检测到GPU支持，使用CPU配置")
+		return CPUConfig()
+	}
+}
+
 // 检查是否为视频文件
 func isVideoFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
@@ -977,16 +1143,36 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 	}
 
 	// 创建输入张量
-	inputShape := ort.NewShape(1, 3, int64(y.config.InputSize), int64(y.config.InputSize))
+	var inputShape ort.Shape
+	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		inputShape = ort.NewShape(1, 3, int64(y.config.InputHeight), int64(y.config.InputWidth))
+	} else {
+		// 使用正方形尺寸
+		inputShape = ort.NewShape(1, 3, int64(y.config.InputSize), int64(y.config.InputSize))
+	}
 	inputTensor, err := ort.NewTensor(inputShape, inputData)
 	if err != nil {
 		return nil, fmt.Errorf("无法创建输入张量: %v", err)
 	}
 	defer inputTensor.Destroy()
 
-	// 创建输出张量
-	outputShape := ort.NewShape(1, 84, 8400)
-	outputData := make([]float32, 1*84*8400)
+	// 创建输出张量（使用动态形状）
+	var outputShape ort.Shape
+	var outputDataSize int
+	if len(y.modelOutputShape) >= 3 {
+		// 使用模型的实际输出形状
+		outputShape = ort.NewShape(y.modelOutputShape...)
+		outputDataSize = 1
+		for _, dim := range y.modelOutputShape {
+			outputDataSize *= int(dim)
+		}
+	} else {
+		// 回退到默认形状
+		outputShape = ort.NewShape(1, 84, 8400)
+		outputDataSize = 1 * 84 * 8400
+	}
+	outputData := make([]float32, outputDataSize)
 	outputTensor, err := ort.NewTensor(outputShape, outputData)
 	if err != nil {
 		return nil, fmt.Errorf("无法创建输出张量: %v", err)
@@ -1003,8 +1189,16 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 	detections := y.parseDetections(outputTensor.GetData(), outputTensor.GetShape())
 
 	// 将坐标从模型输入尺寸转换回原始图像尺寸
-	scaleX := originalWidth / float32(y.config.InputSize)
-	scaleY := originalHeight / float32(y.config.InputSize)
+	var scaleX, scaleY float32
+	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		scaleX = originalWidth / float32(y.config.InputWidth)
+		scaleY = originalHeight / float32(y.config.InputHeight)
+	} else {
+		// 使用正方形尺寸
+		scaleX = originalWidth / float32(y.config.InputSize)
+		scaleY = originalHeight / float32(y.config.InputSize)
+	}
 	
 	for i := range detections {
 		detections[i].Box[0] *= scaleX // x1
@@ -1025,8 +1219,15 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 
 // preprocessImageFromMemory 从内存图像预处理
 func (y *YOLO) preprocessImageFromMemory(img image.Image) ([]float32, error) {
-	// 调整大小
-	resized := imaging.Resize(img, y.config.InputSize, y.config.InputSize, imaging.Lanczos)
+	// 根据配置调整大小
+	var resized image.Image
+	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		resized = imaging.Resize(img, y.config.InputWidth, y.config.InputHeight, imaging.Lanczos)
+	} else {
+		// 使用正方形输入尺寸
+		resized = imaging.Resize(img, y.config.InputSize, y.config.InputSize, imaging.Lanczos)
+	}
 
 	// 转换为RGB并归一化
 	bounds := resized.Bounds()

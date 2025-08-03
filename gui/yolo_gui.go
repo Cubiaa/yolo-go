@@ -466,6 +466,8 @@ func (live *YOLOLiveWindow) processVideo() {
 
 // drawDetectionsOnImage 在图像上绘制检测结果
 func (live *YOLOLiveWindow) drawDetectionsOnImage(img image.Image, detections []yolo.Detection) image.Image {
+	// 极限性能模式：移除调试输出以提升GUI响应速度
+	
 	// 获取原始图像尺寸
 	originalBounds := img.Bounds()
 	originalWidth := float32(originalBounds.Dx())

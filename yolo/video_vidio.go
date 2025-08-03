@@ -119,8 +119,13 @@ func (vp *VidioVideoProcessor) ProcessVideoWithCallback(inputPath string, callba
 		
 		detections, err = vp.detector.detectImage(frameImg)
 		if err != nil {
+			// 极限性能模式：减少错误输出频率
+			if frameCount%100 == 0 {
+				fmt.Printf("❌ 检测错误 (帧 %d): %v\n", frameCount, err)
+			}
 			detections = []Detection{}
 		}
+		// 极限性能模式：移除详细调试输出以提升速度
 
 		// 创建检测结果并调用回调
 		timestamp := time.Duration(float64(frameCount)/video.FPS()*1000) * time.Millisecond
