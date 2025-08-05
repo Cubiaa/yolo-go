@@ -17,6 +17,7 @@ import (
 
 	"os/exec"
 
+	vidio "github.com/AlexEidt/Vidio"
 	"github.com/disintegration/imaging"
 	ort "github.com/yalue/onnxruntime_go"
 	"golang.org/x/image/font"
@@ -93,6 +94,8 @@ type DetectionResults struct {
 	Detections []Detection
 	InputPath  string
 	detector   *YOLO
+	// 新增：存储视频的逐帧检测结果
+	VideoResults []VideoDetectionResult
 }
 
 // Save 保存检测结果到指定路径
@@ -106,8 +109,15 @@ func (dr *DetectionResults) Save(outputPath string) error {
 	}
 
 	if isVideoFile(dr.InputPath) {
-		// 视频：保存带检测框的视频
-		return dr.detector.DetectVideoAndSave(dr.InputPath, outputPath)
+		// 视频：优先使用已有的检测结果快速保存（不保留音频）
+		if len(dr.VideoResults) > 0 {
+			fmt.Println("🚀 使用已有检测结果快速保存视频...")
+			return dr.saveVideoWithCachedResults(outputPath)
+		} else {
+			// 回退到重新检测模式
+			fmt.Println("⚠️ 没有缓存的检测结果，将重新检测视频...")
+			return dr.detector.DetectVideoAndSave(dr.InputPath, outputPath)
+		}
 	} else {
 		// 图片：保存带检测框的图片
 		_, err := dr.detector.DetectAndSave(dr.InputPath, outputPath)
@@ -1599,11 +1609,13 @@ func (y *YOLO) Detect(inputPath string, options *DetectionOptions, callbacks ...
 		// 保存状态用于Save方法
 		y.lastInputPath = inputPath
 		y.lastDetections = &DetectionResults{
-			Detections: allDetections,
-			InputPath:  inputPath,
-			detector:   y,
+			Detections:   allDetections,
+			InputPath:    inputPath,
+			detector:     y,
+			VideoResults: videoResults, // 保存视频逐帧检测结果
 		}
 
+		fmt.Printf("✅ 视频检测完成！共检测 %d 帧，发现 %d 个对象\n", len(videoResults), len(allDetections))
 		return y.lastDetections, nil
 	}
 
@@ -1815,6 +1827,71 @@ func (y *YOLO) loadImageForCallback(imagePath string) (image.Image, error) {
 
 	img, _, err := image.Decode(file)
 	return img, err
+}
+
+// saveVideoWithCachedResults 使用缓存的检测结果快速保存视频
+func (dr *DetectionResults) saveVideoWithCachedResults(outputPath string) error {
+	// 打开输入视频
+	video, err := vidio.NewVideo(dr.InputPath)
+	if err != nil {
+		return fmt.Errorf("无法打开视频文件: %v", err)
+	}
+	defer video.Close()
+
+	// 创建输出视频写入器 - 保持原画质
+	options := &vidio.Options{
+		FPS:     video.FPS(),
+		Quality: 1.0, // 无损质量，保持原画质
+	}
+
+	writer, err := vidio.NewVideoWriter(outputPath, video.Width(), video.Height(), options)
+	if err != nil {
+		return fmt.Errorf("无法创建输出视频: %v", err)
+	}
+	defer writer.Close()
+
+	fmt.Printf("📹 快速保存视频: %s -> %s (使用缓存结果)\n", dr.InputPath, outputPath)
+	frameCount := 0
+	resultIndex := 0
+
+	// 逐帧处理
+	for video.Read() {
+		frameCount++
+
+		// 将帧缓冲区转换为Go图像
+		frameImg := convertFrameBufferToImage(video.FrameBuffer(), video.Width(), video.Height())
+
+		// 使用缓存的检测结果（如果有的话）
+		var detections []Detection
+		if resultIndex < len(dr.VideoResults) && dr.VideoResults[resultIndex].FrameNumber == frameCount {
+			detections = dr.VideoResults[resultIndex].Detections
+			resultIndex++
+		} else {
+			// 如果没有对应帧的检测结果，使用空检测
+			detections = []Detection{}
+		}
+
+		// 绘制检测结果
+		var resultImg image.Image = frameImg
+		if len(detections) > 0 {
+			resultImg = dr.detector.drawDetectionsOnImage(frameImg, detections)
+		}
+
+		// 将图像转换回帧缓冲区并写入
+		frameBuffer := convertImageToFrameBuffer(resultImg)
+		err = writer.Write(frameBuffer)
+		if err != nil {
+			return fmt.Errorf("写入帧失败: %v", err)
+		}
+
+		// 进度提示
+		if frameCount%30 == 0 {
+			fmt.Printf("📊 已处理 %d/%d 帧... (快速模式)\n", frameCount, video.Frames())
+		}
+	}
+
+	fmt.Printf("✅ 视频快速保存完成！共处理 %d 帧，使用了 %d 个缓存检测结果\n", frameCount, len(dr.VideoResults))
+	return nil
 }
 
 func loadClassesFromYAML(configPath string) error {

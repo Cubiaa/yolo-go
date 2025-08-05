@@ -159,7 +159,7 @@ func (vp *VidioVideoProcessor) SaveVideoWithDetections(inputPath, outputPath str
 	// 创建输出视频写入器
 	options := &vidio.Options{
 		FPS:     video.FPS(),
-		Quality: 0.8, // 高质量
+		Quality: 1.0, // 无损质量，保持原画质
 	}
 
 	writer, err := vidio.NewVideoWriter(outputPath, video.Width(), video.Height(), options)
