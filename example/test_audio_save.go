@@ -65,24 +65,11 @@ func main() {
 		fmt.Printf("✅ 带音频视频保存完成，耗时: %.2f秒\n", saveWithAudioTime.Seconds())
 	}
 
-	// 7. 使用自定义音频选项保存
-	fmt.Println("\n🎛️ 使用自定义音频选项保存...")
-	customOptions := &yolo.AudioSaveOptions{
-		PreserveAudio: true,
-		AudioCodec:    "aac",
-		AudioBitrate:  "192k", // 更高的音频质量
-		Quality:       1.0,    // 无损视频质量
-	}
-
-	customOutputPath := "output_custom_audio.mp4"
-	start = time.Now()
-	err = results.SaveWithAudio(customOutputPath, customOptions)
-	if err != nil {
-		log.Printf("⚠️ 自定义音频保存失败: %v\n", err)
-	} else {
-		customSaveTime := time.Since(start)
-		fmt.Printf("✅ 自定义音频视频保存完成，耗时: %.2f秒\n", customSaveTime.Seconds())
-	}
+	// 7. API简化说明
+	fmt.Println("\n✨ SaveWithAudio API 已简化")
+	fmt.Println("   - 自动使用高质量编码 (H.264 CRF 18)")
+	fmt.Println("   - 自动保留音频 (AAC 128k)")
+	fmt.Println("   - 无需额外配置参数")
 
 	// 8. 性能对比
 	fmt.Println("\n📊 === 性能对比 ===")

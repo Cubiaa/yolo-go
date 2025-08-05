@@ -30,7 +30,7 @@ func DefaultAudioSaveOptions() *AudioSaveOptions {
 }
 
 // SaveWithAudio 保存视频并保留音频
-func (dr *DetectionResults) SaveWithAudio(outputPath string, options ...*AudioSaveOptions) error {
+func (dr *DetectionResults) SaveWithAudio(outputPath string) error {
 	if len(dr.Detections) == 0 {
 		return fmt.Errorf("没有检测结果可保存")
 	}
@@ -43,17 +43,12 @@ func (dr *DetectionResults) SaveWithAudio(outputPath string, options ...*AudioSa
 		return fmt.Errorf("音频保存功能仅支持视频文件")
 	}
 
-	// 获取保存选项
-	var opts *AudioSaveOptions
-	if len(options) > 0 && options[0] != nil {
-		opts = options[0]
-	} else {
-		opts = DefaultAudioSaveOptions()
-	}
-
-	// 如果不需要保留音频，使用普通保存方法
-	if !opts.PreserveAudio {
-		return dr.Save(outputPath)
+	// 使用内置的默认高质量设置
+	opts := &AudioSaveOptions{
+		PreserveAudio: true,
+		AudioCodec:    "aac",
+		AudioBitrate:  "128k",
+		TempDir:       "", // 使用系统临时目录
 	}
 
 	// 检查FFmpeg是否可用
