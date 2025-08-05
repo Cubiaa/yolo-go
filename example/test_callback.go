@@ -63,8 +63,8 @@ func main() {
 func testImageCallback(detector *yolo.YOLO) {
 	imagePath := "test_image.jpg" // 请确保有测试图片
 
-	// 使用DetectImageWithCallback
-	detector.DetectImageWithCallback(imagePath, func(detections []yolo.Detection, err error) {
+	// 使用统一的Detect API
+	detector.Detect(imagePath, nil, func(detections []yolo.Detection, err error) {
 		if err != nil {
 			fmt.Printf("❌ 图片检测失败: %v\n", err)
 			return
@@ -87,8 +87,8 @@ func testVideoCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 	var totalDetections int
 	startTime := time.Now()
 
-	// 使用DetectVideoWithCallback
-	err := detector.DetectVideoWithCallback(videoPath, func(result yolo.VideoDetectionResult) {
+	// 使用统一的Detect API
+	_, err := detector.Detect(videoPath, options, func(result yolo.VideoDetectionResult) {
 		frameCount++
 		totalDetections += len(result.Detections)
 
@@ -126,8 +126,8 @@ func testCameraCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 	startTime := time.Now()
 	maxFrames := 50 // 限制处理帧数以避免无限运行
 
-	// 使用DetectFromCameraWithCallback
-	err := detector.DetectFromCameraWithCallback(device, options, func(img image.Image, detections []yolo.Detection, err error) {
+	// 使用统一的DetectFromCamera API
+	_, err := detector.DetectFromCamera(device, options, func(img image.Image, detections []yolo.Detection, err error) {
 		if err != nil {
 			fmt.Printf("❌ 摄像头检测错误: %v\n", err)
 			return
@@ -174,7 +174,7 @@ func testRTSPCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 	maxFrames := 50 // 限制处理帧数
 	startTime := time.Now()
 
-	err := detector.DetectFromRTSPWithCallback(rtspURL, options, func(result yolo.VideoDetectionResult) {
+	_, err := detector.DetectFromRTSP(rtspURL, options, func(result yolo.VideoDetectionResult) {
 		frameCount++
 		elapsed := time.Since(startTime)
 		fps := float64(frameCount) / elapsed.Seconds()
@@ -219,7 +219,7 @@ func testRTMPCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 	maxFrames := 50 // 限制处理帧数
 	startTime := time.Now()
 
-	err := detector.DetectFromRTMPWithCallback(rtmpURL, options, func(result yolo.VideoDetectionResult) {
+	_, err := detector.DetectFromRTMP(rtmpURL, options, func(result yolo.VideoDetectionResult) {
 		frameCount++
 		elapsed := time.Since(startTime)
 		fps := float64(frameCount) / elapsed.Seconds()
@@ -260,7 +260,7 @@ func testScreenCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 	maxFrames := 30 // 限制处理帧数，避免长时间运行
 	startTime := time.Now()
 
-	err := detector.DetectFromScreenWithCallback(options, func(result yolo.VideoDetectionResult) {
+	_, err := detector.DetectFromScreen(options, func(result yolo.VideoDetectionResult) {
 		frameCount++
 		elapsed := time.Since(startTime)
 		fps := float64(frameCount) / elapsed.Seconds()

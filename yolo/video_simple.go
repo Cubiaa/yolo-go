@@ -60,7 +60,7 @@ func (svp *SimpleVideoProcessor) ProcessImageSequence(inputDir, outputDir string
 		outputPath := filepath.Join(outputDir, fmt.Sprintf("frame_%04d.jpg", i))
 
 		// 检测图像
-		detections, err := svp.detector.Detect(inputPath)
+		detections, err := svp.detector.Detect(inputPath, nil)
 		if err != nil {
 			fmt.Printf("处理图像 %s 失败: %v\n", inputPath, err)
 			continue
@@ -115,7 +115,7 @@ func (svp *SimpleVideoProcessor) ProcessImageWithCallback(inputDir string, callb
 		inputPath := filepath.Join(inputDir, file.Name())
 
 		// 检测图像
-		detections, err := svp.detector.Detect(inputPath)
+		detections, err := svp.detector.Detect(inputPath, nil)
 		if err != nil {
 			fmt.Printf("处理图像 %s 失败: %v\n", inputPath, err)
 			continue

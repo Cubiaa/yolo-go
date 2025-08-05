@@ -493,14 +493,6 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 	return keep, nil
 }
 
-// DetectImageWithCallback 检测单张图片并调用回调函数
-func (y *YOLO) DetectImageWithCallback(imagePath string, callback func([]Detection, error)) {
-	detections, err := y.DetectImage(imagePath)
-	callback(detections, err)
-}
-
-
-
 // DetectAndSave 检测图片并保存结果
 func (y *YOLO) DetectAndSave(imagePath, outputPath string) ([]Detection, error) {
 	// 如果没有设置运行时配置，使用默认配置
@@ -531,14 +523,6 @@ func (y *YOLO) DetectAndSave(imagePath, outputPath string) ([]Detection, error) 
 
 	return detections, nil
 }
-
-// DetectAndSaveWithCallback 检测图片并保存结果，同时调用回调函数
-func (y *YOLO) DetectAndSaveWithCallback(imagePath, outputPath string, callback func([]Detection, error)) {
-	detections, err := y.DetectAndSave(imagePath, outputPath)
-	callback(detections, err)
-}
-
-
 
 // DetectVideo 检测视频文件（MP4等）
 func (y *YOLO) DetectVideo(inputPath string, showLive ...bool) ([]VideoDetectionResult, error) {
@@ -603,20 +587,7 @@ func (y *YOLO) Show(inputPath string, outputPath ...string) error {
 	}
 }
 
-// DetectVideoWithCallback 检测视频（使用回调处理每一帧）
-func (y *YOLO) DetectVideoWithCallback(inputPath string, callback func(VideoDetectionResult)) error {
-	// 如果没有设置运行时配置，使用默认配置
-	if y.runtimeConfig == nil {
-		y.runtimeConfig = DefaultDetectionOptions()
-	}
 
-	if !isVideoFile(inputPath) {
-		return fmt.Errorf("不支持的文件格式，请使用MP4等视频文件")
-	}
-
-	processor := NewVidioVideoProcessor(y)
-	return processor.ProcessVideoWithCallback(inputPath, callback)
-}
 
 // DetectVideoAdvanced 高级视频检测（支持更多选项）
 func (y *YOLO) DetectVideoAdvanced(inputPath, outputPath string, options VideoOptions) error {
@@ -1540,12 +1511,12 @@ func StartLiveGUI(detector *YOLO, videoPath string, options *DetectionOptions) e
 //   result, err := detector.Detect("input.jpg")
 //   err = result.Save("output.jpg")
 
-// Detect 检测并返回结果（不保存）
-func (y *YOLO) Detect(inputPath string, options ...*DetectionOptions) (*DetectionResults, error) {
+// Detect 检测并返回结果（不保存），支持可选的回调函数
+func (y *YOLO) Detect(inputPath string, options *DetectionOptions, callbacks ...interface{}) (*DetectionResults, error) {
 	// 使用默认选项或传入的选项
 	opts := DefaultDetectionOptions()
-	if len(options) > 0 {
-		opts = options[0]
+	if options != nil {
+		opts = options
 	}
 
 	// 设置运行时配置
@@ -1557,6 +1528,14 @@ func (y *YOLO) Detect(inputPath string, options ...*DetectionOptions) (*Detectio
 		strings.HasSuffix(strings.ToLower(inputPath), ".png") {
 		// 图片：直接检测
 		detections, err := y.DetectImage(inputPath)
+		
+		// 如果提供了回调函数，调用它
+		if len(callbacks) > 0 {
+			if callback, ok := callbacks[0].(func([]Detection, error)); ok {
+				callback(detections, err)
+			}
+		}
+		
 		if err != nil {
 			return nil, err
 		}
@@ -1588,6 +1567,13 @@ func (y *YOLO) Detect(inputPath string, options ...*DetectionOptions) (*Detectio
 			videoResults = append(videoResults, result)
 			allDetections = append(allDetections, result.Detections...)
 
+			// 如果提供了回调函数，调用它
+			if len(callbacks) > 0 {
+				if callback, ok := callbacks[0].(func(VideoDetectionResult)); ok {
+					callback(result)
+				}
+			}
+
 			// 实时更新状态
 			fmt.Printf("📊 处理帧 %d, 检测到 %d 个对象\n", len(videoResults), len(result.Detections))
 		})
@@ -1610,8 +1596,8 @@ func (y *YOLO) Detect(inputPath string, options ...*DetectionOptions) (*Detectio
 	return nil, fmt.Errorf("不支持的文件格式")
 }
 
-// DetectFromCamera 从摄像头进行实时检测
-func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions) (*DetectionResults, error) {
+// DetectFromCamera 从摄像头进行实时检测，支持可选的回调函数
+func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions, callback ...func(image.Image, []Detection, error)) (*DetectionResults, error) {
 	fmt.Printf("📹 从摄像头检测: %s\n", device)
 
 	// 设置运行时配置
@@ -1627,6 +1613,10 @@ func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions) (*Dete
 	err := processor.ProcessCameraWithCallback(func(img image.Image, detections []Detection, err error) {
 		if err != nil {
 			fmt.Printf("摄像头检测错误: %v\n", err)
+			// 如果提供了回调函数，也调用它
+			if len(callback) > 0 && callback[0] != nil {
+				callback[0](img, detections, err)
+			}
 			return
 		}
 		
@@ -1636,7 +1626,10 @@ func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions) (*Dete
 		// 实时更新状态
 		fmt.Printf("📊 摄像头帧 %d, 检测到 %d 个对象\n", frameCount, len(detections))
 		
-
+		// 如果提供了回调函数，调用它
+		if len(callback) > 0 && callback[0] != nil {
+			callback[0](img, detections, err)
+		}
 	})
 
 	if err != nil {
@@ -1654,22 +1647,10 @@ func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions) (*Dete
 	return y.lastDetections, nil
 }
 
-// DetectFromCameraWithCallback 从摄像头进行实时检测并调用回调函数
-func (y *YOLO) DetectFromCameraWithCallback(device string, options *DetectionOptions, callback func(image.Image, []Detection, error)) error {
-	fmt.Printf("📹 从摄像头检测: %s\n", device)
 
-	// 设置运行时配置
-	y.runtimeConfig = options
 
-	// 使用CameraVideoProcessor处理摄像头流
-	processor := NewCameraVideoProcessor(y, device)
-
-	// 直接使用回调函数处理摄像头流
-	return processor.ProcessCameraWithCallback(callback)
-}
-
-// DetectFromRTSP 从RTSP流进行实时检测
-func (y *YOLO) DetectFromRTSP(rtspURL string, options *DetectionOptions) (*DetectionResults, error) {
+// DetectFromRTSP 从RTSP流进行实时检测，支持可选的回调函数
+func (y *YOLO) DetectFromRTSP(rtspURL string, options *DetectionOptions, callback ...func(VideoDetectionResult)) (*DetectionResults, error) {
 	fmt.Printf("🌐 从RTSP流检测: %s\n", rtspURL)
 
 	// 创建RTSP输入源
@@ -1694,6 +1675,11 @@ func (y *YOLO) DetectFromRTSP(rtspURL string, options *DetectionOptions) (*Detec
 
 		// 实时更新状态
 		fmt.Printf("📊 RTSP帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
+		
+		// 如果提供了回调函数，调用它
+		if len(callback) > 0 && callback[0] != nil {
+			callback[0](result)
+		}
 	})
 
 	if err != nil {
@@ -1711,28 +1697,10 @@ func (y *YOLO) DetectFromRTSP(rtspURL string, options *DetectionOptions) (*Detec
 	return y.lastDetections, nil
 }
 
-// DetectFromRTSPWithCallback 从RTSP流进行实时检测并调用回调函数
-func (y *YOLO) DetectFromRTSPWithCallback(rtspURL string, options *DetectionOptions, callback func(VideoDetectionResult)) error {
-	fmt.Printf("🌐 从RTSP流检测: %s\n", rtspURL)
 
-	// 创建RTSP输入源
-	input := NewRTSPInput(rtspURL)
-	if err := input.Validate(); err != nil {
-		return fmt.Errorf("RTSP输入验证失败: %v", err)
-	}
 
-	// 设置运行时配置
-	y.runtimeConfig = options
-
-	// 使用Vidio处理RTSP流
-	processor := NewVidioVideoProcessor(y)
-
-	// 直接使用回调函数处理RTSP流
-	return processor.ProcessVideoWithCallback(input.GetFFmpegInput(), callback)
-}
-
-// DetectFromScreen 从屏幕录制进行实时检测
-func (y *YOLO) DetectFromScreen(options *DetectionOptions) (*DetectionResults, error) {
+// DetectFromScreen 从屏幕录制进行实时检测，支持可选的回调函数
+func (y *YOLO) DetectFromScreen(options *DetectionOptions, callback ...func(VideoDetectionResult)) (*DetectionResults, error) {
 	fmt.Println("🖥️  从屏幕录制检测")
 
 	// 创建屏幕输入源
@@ -1757,6 +1725,11 @@ func (y *YOLO) DetectFromScreen(options *DetectionOptions) (*DetectionResults, e
 
 		// 实时更新状态
 		fmt.Printf("📊 屏幕帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
+		
+		// 如果提供了回调函数，调用它
+		if len(callback) > 0 && callback[0] != nil {
+			callback[0](result)
+		}
 	})
 
 	if err != nil {
@@ -1774,28 +1747,10 @@ func (y *YOLO) DetectFromScreen(options *DetectionOptions) (*DetectionResults, e
 	return y.lastDetections, nil
 }
 
-// DetectFromScreenWithCallback 从屏幕录制进行实时检测并调用回调函数
-func (y *YOLO) DetectFromScreenWithCallback(options *DetectionOptions, callback func(VideoDetectionResult)) error {
-	fmt.Println("🖥️  从屏幕录制检测")
 
-	// 创建屏幕输入源
-	input := NewScreenInput()
-	if err := input.Validate(); err != nil {
-		return fmt.Errorf("屏幕输入验证失败: %v", err)
-	}
 
-	// 设置运行时配置
-	y.runtimeConfig = options
-
-	// 使用Vidio处理屏幕流
-	processor := NewVidioVideoProcessor(y)
-
-	// 直接使用回调函数处理屏幕流
-	return processor.ProcessVideoWithCallback(input.GetFFmpegInput(), callback)
-}
-
-// DetectFromRTMP 从RTMP流进行实时检测
-func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions) (*DetectionResults, error) {
+// DetectFromRTMP 从RTMP流进行实时检测，支持可选的回调函数
+func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions, callback ...func(VideoDetectionResult)) (*DetectionResults, error) {
 	fmt.Printf("🌐 从RTMP流检测: %s\n", rtmpURL)
 
 	// 创建RTMP输入源
@@ -1820,6 +1775,11 @@ func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions) (*Detec
 
 		// 实时更新状态
 		fmt.Printf("📊 RTMP帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
+		
+		// 如果提供了回调函数，调用它
+		if len(callback) > 0 && callback[0] != nil {
+			callback[0](result)
+		}
 	})
 
 	if err != nil {
@@ -1837,25 +1797,7 @@ func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions) (*Detec
 	return y.lastDetections, nil
 }
 
-// DetectFromRTMPWithCallback 从RTMP流进行实时检测并调用回调函数
-func (y *YOLO) DetectFromRTMPWithCallback(rtmpURL string, options *DetectionOptions, callback func(VideoDetectionResult)) error {
-	fmt.Printf("🌐 从RTMP流检测: %s\n", rtmpURL)
 
-	// 创建RTMP输入源
-	input := NewRTMPInput(rtmpURL)
-	if err := input.Validate(); err != nil {
-		return fmt.Errorf("RTMP输入验证失败: %v", err)
-	}
-
-	// 设置运行时配置
-	y.runtimeConfig = options
-
-	// 使用Vidio处理RTMP流
-	processor := NewVidioVideoProcessor(y)
-
-	// 直接使用回调函数处理RTMP流
-	return processor.ProcessVideoWithCallback(input.GetFFmpegInput(), callback)
-}
 
 // loadClassesFromYAML 从YAML文件加载类别列表
 func loadClassesFromYAML(configPath string) error {
