@@ -1831,30 +1831,33 @@ func (y *YOLO) loadImageForCallback(imagePath string) (image.Image, error) {
 
 // saveVideoWithCachedResults 使用缓存的检测结果快速保存视频
 func (dr *DetectionResults) saveVideoWithCachedResults(outputPath string) error {
-	// 打开输入视频
+	// 使用FFmpeg进行高质量编码，与SaveWithAudio保持一致
+	return dr.saveVideoWithFFmpeg(outputPath)
+}
+
+// saveVideoWithFFmpeg 使用FFmpeg保存视频（无音频版本）
+func (dr *DetectionResults) saveVideoWithFFmpeg(outputPath string) error {
+	// 创建临时目录存储帧
+	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("yolo_frames_%d", time.Now().UnixNano()))
+	err := os.MkdirAll(tempDir, 0755)
+	if err != nil {
+		return fmt.Errorf("无法创建临时目录: %v", err)
+	}
+	defer os.RemoveAll(tempDir) // 清理临时文件
+
+	// 打开输入视频获取信息
 	video, err := vidio.NewVideo(dr.InputPath)
 	if err != nil {
 		return fmt.Errorf("无法打开视频文件: %v", err)
 	}
 	defer video.Close()
 
-	// 创建输出视频写入器 - 保持原画质
-	options := &vidio.Options{
-		FPS:     video.FPS(),
-		Quality: 1.0, // 无损质量，保持原画质
-	}
-
-	writer, err := vidio.NewVideoWriter(outputPath, video.Width(), video.Height(), options)
-	if err != nil {
-		return fmt.Errorf("无法创建输出视频: %v", err)
-	}
-	defer writer.Close()
-
-	fmt.Printf("📹 快速保存视频: %s -> %s (使用缓存结果)\n", dr.InputPath, outputPath)
+	fps := video.FPS()
+	fmt.Printf("📹 保存视频: %s -> %s (使用FFmpeg高质量编码)\n", dr.InputPath, outputPath)
 	frameCount := 0
 	resultIndex := 0
 
-	// 逐帧处理
+	// 逐帧处理并保存为图片
 	for video.Read() {
 		frameCount++
 
@@ -1877,20 +1880,50 @@ func (dr *DetectionResults) saveVideoWithCachedResults(outputPath string) error 
 			resultImg = dr.detector.drawDetectionsOnImage(frameImg, detections)
 		}
 
-		// 将图像转换回帧缓冲区并写入
-		frameBuffer := convertImageToFrameBuffer(resultImg)
-		err = writer.Write(frameBuffer)
+		// 保存帧为图片
+		framePath := filepath.Join(tempDir, fmt.Sprintf("frame_%04d.jpg", frameCount))
+		file, err := os.Create(framePath)
 		if err != nil {
-			return fmt.Errorf("写入帧失败: %v", err)
+			return fmt.Errorf("无法创建帧文件: %v", err)
+		}
+
+		err = jpeg.Encode(file, resultImg, &jpeg.Options{Quality: 95})
+		file.Close()
+		if err != nil {
+			return fmt.Errorf("无法保存帧: %v", err)
 		}
 
 		// 进度提示
 		if frameCount%30 == 0 {
-			fmt.Printf("📊 已处理 %d/%d 帧... (快速模式)\n", frameCount, video.Frames())
+			fmt.Printf("📊 已处理 %d 帧...\n", frameCount)
 		}
 	}
 
-	fmt.Printf("✅ 视频快速保存完成！共处理 %d 帧，使用了 %d 个缓存检测结果\n", frameCount, len(dr.VideoResults))
+	// 使用FFmpeg将帧合成视频 - 与SaveWithAudio使用相同的编码参数
+	args := []string{
+		"-r", fmt.Sprintf("%d", fps),
+		"-i", filepath.Join(tempDir, "frame_%04d.jpg"),
+		"-c:v", "libx264",        // 使用H.264编码器
+		"-crf", "18",            // CRF 18 视觉无损质量
+		"-preset", "slow",       // slow预设获得更好压缩
+		"-pix_fmt", "yuv420p",   // 使用yuv420p标准格式
+		"-y",                    // 覆盖输出文件
+		outputPath,
+	}
+
+	cmd := exec.Command("ffmpeg", args...)
+	cmd.Stderr = os.Stderr
+
+	fmt.Printf("🎬 使用FFmpeg合成视频: ffmpeg %s\n", strings.Join(args, " "))
+	start := time.Now()
+	err = cmd.Run()
+	if err != nil {
+		return fmt.Errorf("FFmpeg视频合成失败: %v", err)
+	}
+
+	duration := time.Since(start)
+	fmt.Printf("✅ 视频保存完成！共处理 %d 帧，使用了 %d 个缓存检测结果，耗时: %.2f秒\n", frameCount, len(dr.VideoResults), duration.Seconds())
+	fmt.Printf("📁 输出文件: %s\n", outputPath)
 	return nil
 }
 
