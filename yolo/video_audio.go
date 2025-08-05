@@ -128,18 +128,15 @@ func (dr *DetectionResults) saveVideoWithAudioRedetect(outputPath string, opts *
 func (dr *DetectionResults) mergeAudioWithFFmpeg(originalVideoPath, processedVideoPath, outputPath string, opts *AudioSaveOptions) error {
 	fmt.Println("🔄 正在使用FFmpeg合并音频...")
 
-	// 构建FFmpeg命令 - 通用高质量编码设置
+	// 构建FFmpeg命令 - 基本高质量编码设置
 	args := []string{
 		"-i", processedVideoPath, // 处理后的视频（无音频）
 		"-i", originalVideoPath,  // 原始视频（有音频）
 		"-c:v", "libx264",        // 使用H.264编码器
-		"-crf", "15",            // 设置CRF值为15（极高质量，接近原画质）
-		"-preset", "slow",       // 使用慢速预设获得更好的压缩效率
-		"-pix_fmt", "yuv420p",   // 使用yuv420p标准格式确保兼容性
-		"-profile:v", "high",    // 使用high profile获得更好的压缩效率
-		"-level", "4.0",         // 使用4.0 level支持高分辨率
-		"-movflags", "+faststart", // 优化MP4文件结构，支持流媒体播放
-		"-tune", "film",         // 针对真实视频内容优化
+		"-b:v", "8M",            // 设置视频比特率为8Mbps（高质量）
+		"-maxrate", "10M",       // 最大比特率
+		"-bufsize", "16M",       // 缓冲区大小
+		"-pix_fmt", "yuv420p",   // 使用yuv420p标准格式
 		"-c:a", opts.AudioCodec,  // 音频编解码器
 		"-b:a", opts.AudioBitrate, // 音频比特率
 		"-map", "0:v:0",         // 使用第一个输入的视频流
