@@ -3,6 +3,7 @@ package yolo
 import (
 	"fmt"
 	"image"
+	"image/draw"
 	"time"
 
 	vidio "github.com/AlexEidt/Vidio"
@@ -218,15 +219,15 @@ func convertFrameBufferToImage(frameBuffer []byte, width, height int) image.Imag
 // convertImageToFrameBuffer 将Go图像转换为帧缓冲区
 func convertImageToFrameBuffer(img image.Image) []byte {
 	bounds := img.Bounds()
-	width, height := bounds.Max.X, bounds.Max.Y
-
-	// 创建RGBA图像
-	rgba := image.NewRGBA(bounds)
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			rgba.Set(x, y, img.At(x, y))
-		}
+	
+	// 如果输入已经是RGBA格式，直接返回像素数据
+	if rgba, ok := img.(*image.RGBA); ok {
+		return rgba.Pix
 	}
-
+	
+	// 否则创建新的RGBA图像并高效复制
+	rgba := image.NewRGBA(bounds)
+	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+	
 	return rgba.Pix
 }
