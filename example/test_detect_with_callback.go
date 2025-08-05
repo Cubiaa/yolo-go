@@ -39,14 +39,10 @@ func main() {
 
 	// 示例2：图片检测 - 使用回调
 	fmt.Println("\n📸 示例2：图片检测（带回调）")
-	detector.Detect("test.jpg", options, func(detections []yolo.Detection, err error) {
-		if err != nil {
-			fmt.Printf("回调中收到错误: %v\n", err)
-			return
-		}
-		fmt.Printf("🎯 回调函数：检测到 %d 个对象\n", len(detections))
-		for i, detection := range detections {
-			fmt.Printf("   对象 %d: %s (置信度: %.2f)\n", i+1, detection.Class, detection.Score)
+	detector.Detect("test.jpg", options, func(result yolo.VideoDetectionResult) {
+		fmt.Printf("✅ 检测完成: 发现 %d 个对象\n", len(result.Detections))
+		for _, detection := range result.Detections {
+			fmt.Printf("  -> %s (%.2f)\n", detection.Class, detection.Score)
 		}
 	})
 

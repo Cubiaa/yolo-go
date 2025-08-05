@@ -78,24 +78,19 @@ func testCameraWithCallback(detector *yolo.YOLO, options *yolo.DetectionOptions)
 	var frameCount int
 	var totalDetections int
 	
-	// 传递回调函数进行实时处理
-	results, err := detector.DetectFromCamera("0", options, func(img image.Image, detections []yolo.Detection, err error) {
-		if err != nil {
-			fmt.Printf("⚠️ 检测错误: %v\n", err)
-			return
-		}
-		
+	// 传递回调函数进行实时处理，使用统一的VideoDetectionResult
+	results, err := detector.DetectFromCamera("0", options, func(result yolo.VideoDetectionResult) {
 		frameCount++
-		totalDetections += len(detections)
+		totalDetections += len(result.Detections)
 		
 		// 每10帧输出一次统计信息
 		if frameCount%10 == 0 {
-			fmt.Printf("📊 已处理 %d 帧，平均每帧检测到 %.1f 个对象\n", 
-				frameCount, float64(totalDetections)/float64(frameCount))
+			fmt.Printf("📊 已处理 %d 帧 (帧号: %d, 时间戳: %.2fs)，平均每帧检测到 %.1f 个对象\n", 
+				frameCount, result.FrameNumber, result.Timestamp.Seconds(), float64(totalDetections)/float64(frameCount))
 		}
 		
 		// 输出检测结果详情
-		for i, detection := range detections {
+		for i, detection := range result.Detections {
 			fmt.Printf("  对象 %d: %s (置信度: %.2f%%, 位置: [%.0f,%.0f,%.0f,%.0f])\n",
 				i+1, detection.Class, detection.Score*100,
 				detection.Box[0], detection.Box[1], detection.Box[2], detection.Box[3])

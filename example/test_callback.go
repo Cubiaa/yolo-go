@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"image"
 	"time"
 
 	"github.com/Cubiaa/yolo-go/yolo"
@@ -64,14 +63,9 @@ func testImageCallback(detector *yolo.YOLO) {
 	imagePath := "test_image.jpg" // 请确保有测试图片
 
 	// 使用统一的Detect API
-	detector.Detect(imagePath, nil, func(detections []yolo.Detection, err error) {
-		if err != nil {
-			fmt.Printf("❌ 图片检测失败: %v\n", err)
-			return
-		}
-
-		fmt.Printf("📊 图片检测结果: 发现 %d 个对象\n", len(detections))
-		for i, detection := range detections {
+	detector.Detect(imagePath, nil, func(result yolo.VideoDetectionResult) {
+		fmt.Printf("📊 图片检测结果: 发现 %d 个对象\n", len(result.Detections))
+		for i, detection := range result.Detections {
 			fmt.Printf("  对象 %d: %s (置信度: %.2f%%, 坐标: [%.1f, %.1f, %.1f, %.1f])\n",
 				i+1, detection.Class, detection.Score*100,
 				detection.Box[0], detection.Box[1], detection.Box[2], detection.Box[3])
@@ -126,24 +120,19 @@ func testCameraCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 	startTime := time.Now()
 	maxFrames := 50 // 限制处理帧数以避免无限运行
 
-	// 使用统一的DetectFromCamera API
-	_, err := detector.DetectFromCamera(device, options, func(img image.Image, detections []yolo.Detection, err error) {
-		if err != nil {
-			fmt.Printf("❌ 摄像头检测错误: %v\n", err)
-			return
-		}
-
+	// 使用统一的DetectFromCamera API，现在使用VideoDetectionResult回调
+	_, err := detector.DetectFromCamera(device, options, func(result yolo.VideoDetectionResult) {
 		frameCount++
 
 		// 每5帧输出一次统计信息
 		if frameCount%5 == 0 {
 			elapsed := time.Since(startTime)
 			fps := float64(frameCount) / elapsed.Seconds()
-			fmt.Printf("📹 摄像头帧 %d: 检测到 %d 个对象, FPS: %.1f\n",
-				frameCount, len(detections), fps)
+			fmt.Printf("📹 摄像头帧 %d (帧号: %d, 时间戳: %.2fs): 检测到 %d 个对象, FPS: %.1f\n",
+				frameCount, result.FrameNumber, result.Timestamp.Seconds(), len(result.Detections), fps)
 
 			// 输出检测到的对象
-			for _, detection := range detections {
+			for _, detection := range result.Detections {
 				fmt.Printf("  -> %s (%.2f)\n", detection.Class, detection.Score)
 			}
 		}
@@ -185,7 +174,7 @@ func testRTSPCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 		// 显示检测详情
 		for i, detection := range result.Detections {
 			if i < 3 { // 只显示前3个检测结果
-				fmt.Printf("  🎯 %s (%.2f%%) [%.0f,%.0f,%.0f,%.0f]\n", 
+				fmt.Printf("  🎯 %s (%.2f%%) [%.0f,%.0f,%.0f,%.0f]\n",
 					detection.Class, detection.Score*100,
 					detection.Box[0], detection.Box[1],
 					detection.Box[2], detection.Box[3])
@@ -230,7 +219,7 @@ func testRTMPCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 		// 显示检测详情
 		for i, detection := range result.Detections {
 			if i < 3 { // 只显示前3个检测结果
-				fmt.Printf("  🎯 %s (%.2f%%) [%.0f,%.0f,%.0f,%.0f]\n", 
+				fmt.Printf("  🎯 %s (%.2f%%) [%.0f,%.0f,%.0f,%.0f]\n",
 					detection.Class, detection.Score*100,
 					detection.Box[0], detection.Box[1],
 					detection.Box[2], detection.Box[3])
@@ -271,7 +260,7 @@ func testScreenCallback(detector *yolo.YOLO, options *yolo.DetectionOptions) {
 		// 显示检测详情
 		for i, detection := range result.Detections {
 			if i < 5 { // 显示前5个检测结果
-				fmt.Printf("  🎯 %s (%.2f%%) [%.0f,%.0f,%.0f,%.0f]\n", 
+				fmt.Printf("  🎯 %s (%.2f%%) [%.0f,%.0f,%.0f,%.0f]\n",
 					detection.Class, detection.Score*100,
 					detection.Box[0], detection.Box[1],
 					detection.Box[2], detection.Box[3])

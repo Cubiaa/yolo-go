@@ -1531,8 +1531,22 @@ func (y *YOLO) Detect(inputPath string, options *DetectionOptions, callbacks ...
 		
 		// 如果提供了回调函数，调用它
 		if len(callbacks) > 0 {
-			if callback, ok := callbacks[0].(func([]Detection, error)); ok {
-				callback(detections, err)
+			if callback, ok := callbacks[0].(func(VideoDetectionResult)); ok {
+				// 为图片创建VideoDetectionResult
+				if err == nil {
+					// 加载图片用于回调
+					img, imgErr := y.loadImageForCallback(inputPath)
+					result := VideoDetectionResult{
+						FrameNumber: 1, // 图片只有一帧
+						Timestamp:   0,
+						Detections:  detections,
+						Image:       img,
+					}
+					if imgErr != nil {
+						result.Image = nil
+					}
+					callback(result)
+				}
 			}
 		}
 		
@@ -1596,8 +1610,8 @@ func (y *YOLO) Detect(inputPath string, options *DetectionOptions, callbacks ...
 	return nil, fmt.Errorf("不支持的文件格式")
 }
 
-// DetectFromCamera 从摄像头进行实时检测，支持可选的回调函数
-func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions, callback ...func(image.Image, []Detection, error)) (*DetectionResults, error) {
+// DetectFromCamera 从摄像头检测对象，统一使用VideoDetectionResult回调
+func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions, callback ...func(VideoDetectionResult)) (*DetectionResults, error) {
 	fmt.Printf("📹 从摄像头检测: %s\n", device)
 
 	// 设置运行时配置
@@ -1609,26 +1623,17 @@ func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions, callba
 	var allDetections []Detection
 	var frameCount int
 
-	// 处理摄像头流
-	err := processor.ProcessCameraWithCallback(func(img image.Image, detections []Detection, err error) {
-		if err != nil {
-			fmt.Printf("摄像头检测错误: %v\n", err)
-			// 如果提供了回调函数，也调用它
-			if len(callback) > 0 && callback[0] != nil {
-				callback[0](img, detections, err)
-			}
-			return
-		}
-		
+	// 处理摄像头流，使用VideoDetectionResult回调
+	err := processor.ProcessCameraWithCallback(func(result VideoDetectionResult) {
 		frameCount++
-		allDetections = append(allDetections, detections...)
+		allDetections = append(allDetections, result.Detections...)
 
 		// 实时更新状态
-		fmt.Printf("📊 摄像头帧 %d, 检测到 %d 个对象\n", frameCount, len(detections))
+		fmt.Printf("📊 摄像头帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
 		
 		// 如果提供了回调函数，调用它
 		if len(callback) > 0 && callback[0] != nil {
-			callback[0](img, detections, err)
+			callback[0](result)
 		}
 	})
 
@@ -1800,6 +1805,18 @@ func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions, callbac
 
 
 // loadClassesFromYAML 从YAML文件加载类别列表
+// loadImageForCallback 加载图片用于回调
+func (y *YOLO) loadImageForCallback(imagePath string) (image.Image, error) {
+	file, err := os.Open(imagePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	return img, err
+}
+
 func loadClassesFromYAML(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {

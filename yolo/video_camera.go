@@ -26,8 +26,8 @@ func NewCameraVideoProcessor(detector *YOLO, inputPath string) *CameraVideoProce
 	}
 }
 
-// ProcessCameraWithCallback 处理摄像头输入并通过回调返回结果
-func (cvp *CameraVideoProcessor) ProcessCameraWithCallback(callback func(image.Image, []Detection, error)) error {
+// ProcessCameraWithCallback 处理摄像头输入并通过VideoDetectionResult回调返回结果
+func (cvp *CameraVideoProcessor) ProcessCameraWithCallback(callback func(VideoDetectionResult)) error {
 	// 创建输入源
 	inputSource := NewCameraInput(cvp.inputPath)
 	
@@ -111,7 +111,13 @@ func (cvp *CameraVideoProcessor) ProcessCameraWithCallback(callback func(image.I
 			n, err := stdout.Read(frameBuffer[bytesRead:])
 			if err != nil {
 				if cvp.isRunning {
-					callback(nil, nil, fmt.Errorf("读取帧数据失败: %v", err))
+					// 对于错误情况，创建一个空的VideoDetectionResult
+					callback(VideoDetectionResult{
+						FrameNumber: int(cvp.frameCount),
+						Timestamp:   time.Duration(cvp.frameCount) * 200 * time.Millisecond, // 假设5fps
+						Detections:  nil,
+						Image:       nil,
+					})
 				}
 				return nil
 			}
@@ -148,12 +154,22 @@ func (cvp *CameraVideoProcessor) ProcessCameraWithCallback(callback func(image.I
 		// 进行YOLO检测
 		detections, err := cvp.detector.detectImage(img)
 		if err != nil {
-			callback(img, nil, fmt.Errorf("YOLO检测失败: %v", err))
+			callback(VideoDetectionResult{
+				FrameNumber: int(cvp.frameCount),
+				Timestamp:   time.Duration(cvp.frameCount) * 200 * time.Millisecond, // 假设5fps
+				Detections:  nil,
+				Image:       img,
+			})
 			continue
 		}
 		
 		// 通过回调返回结果
-		callback(img, detections, nil)
+		callback(VideoDetectionResult{
+			FrameNumber: int(cvp.frameCount),
+			Timestamp:   time.Duration(cvp.frameCount) * 200 * time.Millisecond, // 假设5fps
+			Detections:  detections,
+			Image:       img,
+		})
 		
 		// 添加小延迟以控制处理速度
 		time.Sleep(50 * time.Millisecond)

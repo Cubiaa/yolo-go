@@ -390,14 +390,7 @@ func (live *YOLOLiveWindow) processVideo() {
 		// 使用专门的摄像头处理器
 		cameraProcessor := yolo.NewCameraVideoProcessor(live.detector, live.inputSource.Path)
 		
-		err := cameraProcessor.ProcessCameraWithCallback(func(img image.Image, detections []yolo.Detection, err error) {
-			if err != nil {
-				fyne.Do(func() {
-					live.statusLabel.SetText(fmt.Sprintf("摄像头错误: %v", err))
-				})
-				return
-			}
-			
+		err := cameraProcessor.ProcessCameraWithCallback(func(result yolo.VideoDetectionResult) {
 			if !live.isPlaying {
 				return
 			}
@@ -406,7 +399,7 @@ func (live *YOLOLiveWindow) processVideo() {
 
 			// 每5帧输出一次调试信息
 			if frameCount%5 == 1 {
-				fmt.Printf("GUI收到第 %d 帧，图像尺寸: %dx%d，检测数量: %d\n", frameCount, img.Bounds().Dx(), img.Bounds().Dy(), len(detections))
+				fmt.Printf("GUI收到第 %d 帧，图像尺寸: %dx%d，检测数量: %d\n", frameCount, result.Image.Bounds().Dx(), result.Image.Bounds().Dy(), len(result.Detections))
 			}
 
 			// 跳帧处理以提高性能
@@ -420,7 +413,7 @@ func (live *YOLOLiveWindow) processVideo() {
 				img image.Image
 				detections []yolo.Detection
 				frameNum int
-			}{img: img, detections: detections, frameNum: frameCount}:
+			}{img: result.Image, detections: result.Detections, frameNum: frameCount}:
 				fmt.Printf("成功发送第 %d 帧到GUI更新通道\n", frameCount)
 			default:
 				fmt.Printf("GUI更新通道满，跳过第 %d 帧\n", frameCount)
