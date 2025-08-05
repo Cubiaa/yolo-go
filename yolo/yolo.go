@@ -1901,7 +1901,7 @@ func (dr *DetectionResults) saveVideoWithFFmpeg(outputPath string) error {
 
 	// 使用FFmpeg将帧合成视频 - 与SaveWithAudio使用相同的编码参数
 	args := []string{
-		"-r", fmt.Sprintf("%d", fps),
+		"-r", fmt.Sprintf("%.0f", fps),
 		"-i", filepath.Join(tempDir, "frame_%04d.jpg"),
 		"-c:v", "libx264",        // 使用H.264编码器
 		"-crf", "18",            // CRF 18 视觉无损质量
