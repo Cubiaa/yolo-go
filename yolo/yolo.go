@@ -907,9 +907,9 @@ func (y *YOLO) drawDetections(imagePath, outputPath string, detections []Detecti
 	case ".png":
 		err = png.Encode(outputFile, origImg)
 	case ".jpg", ".jpeg":
-		err = jpeg.Encode(outputFile, origImg, &jpeg.Options{Quality: 90})
+		err = jpeg.Encode(outputFile, origImg, &jpeg.Options{Quality: 100})
 	default:
-		err = jpeg.Encode(outputFile, origImg, &jpeg.Options{Quality: 90})
+		err = jpeg.Encode(outputFile, origImg, &jpeg.Options{Quality: 100})
 	}
 
 	if err != nil {
@@ -1257,7 +1257,7 @@ func ConvertVideoToFrames(videoPath, outputDir string, fps int) string {
 
 // ConvertFramesToVideo 提供帧转视频的命令建议
 func ConvertFramesToVideo(framesDir, outputPath string, fps int) string {
-	return fmt.Sprintf("ffmpeg -r %d -i \"%s/frame_%%04d.jpg\" -c:v libx264 -pix_fmt yuv420p \"%s\"", fps, framesDir, outputPath)
+	return fmt.Sprintf("ffmpeg -r %d -i \"%s/frame_%%04d.jpg\" -c:v libx264 -crf 0 -pix_fmt yuv444p \"%s\"", fps, framesDir, outputPath)
 }
 
 // detectImage 检测单张图像（内部方法）

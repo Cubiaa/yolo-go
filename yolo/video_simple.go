@@ -307,10 +307,10 @@ func SaveImage(img image.Image, path string) error {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".jpg", ".jpeg":
-		return jpeg.Encode(file, img, &jpeg.Options{Quality: 90})
+		return jpeg.Encode(file, img, &jpeg.Options{Quality: 100})
 	case ".png":
 		return png.Encode(file, img)
 	default:
-		return jpeg.Encode(file, img, &jpeg.Options{Quality: 90})
+		return jpeg.Encode(file, img, &jpeg.Options{Quality: 100})
 	}
 }
