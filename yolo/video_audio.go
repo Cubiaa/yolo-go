@@ -128,14 +128,11 @@ func (dr *DetectionResults) saveVideoWithAudioRedetect(outputPath string, opts *
 func (dr *DetectionResults) mergeAudioWithFFmpeg(originalVideoPath, processedVideoPath, outputPath string, opts *AudioSaveOptions) error {
 	fmt.Println("🔄 正在使用FFmpeg合并音频...")
 
-	// 构建FFmpeg命令 - 基本高质量编码设置
+	// 构建FFmpeg命令 - 简单编码设置
 	args := []string{
 		"-i", processedVideoPath, // 处理后的视频（无音频）
 		"-i", originalVideoPath,  // 原始视频（有音频）
 		"-c:v", "libx264",        // 使用H.264编码器
-		"-b:v", "8M",            // 设置视频比特率为8Mbps（高质量）
-		"-maxrate", "10M",       // 最大比特率
-		"-bufsize", "16M",       // 缓冲区大小
 		"-pix_fmt", "yuv420p",   // 使用yuv420p标准格式
 		"-c:a", opts.AudioCodec,  // 音频编解码器
 		"-b:a", opts.AudioBitrate, // 音频比特率
