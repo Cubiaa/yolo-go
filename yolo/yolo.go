@@ -1257,7 +1257,7 @@ func ConvertVideoToFrames(videoPath, outputDir string, fps int) string {
 
 // ConvertFramesToVideo 提供帧转视频的命令建议
 func ConvertFramesToVideo(framesDir, outputPath string, fps int) string {
-	return fmt.Sprintf("ffmpeg -r %d -i \"%s/frame_%%04d.jpg\" -c:v libx264 -pix_fmt yuv420p \"%s\"", fps, framesDir, outputPath)
+	return fmt.Sprintf("ffmpeg -r %d -i \"%s/frame_%%04d.jpg\" -c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p \"%s\"", fps, framesDir, outputPath)
 }
 
 // detectImage 检测单张图像（内部方法）
