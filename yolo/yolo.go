@@ -1417,22 +1417,38 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 	detections := y.parseDetections(outputTensor.GetData(), actualOutputShape)
 
 	// 将坐标从模型输入尺寸转换回原始图像尺寸
-	var scaleX, scaleY float32
+	// 需要考虑resizeWithPadding的影响
+	var targetWidth, targetHeight int
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
-		// 使用自定义的宽度和高度
-		scaleX = originalWidth / float32(y.config.InputWidth)
-		scaleY = originalHeight / float32(y.config.InputHeight)
+		targetWidth = y.config.InputWidth
+		targetHeight = y.config.InputHeight
 	} else {
-		// 使用正方形尺寸
-		scaleX = originalWidth / float32(y.config.InputSize)
-		scaleY = originalHeight / float32(y.config.InputSize)
+		targetWidth = y.config.InputSize
+		targetHeight = y.config.InputSize
 	}
 	
+	// 计算缩放比例和padding偏移
+	scaleX := float32(originalWidth) / float32(targetWidth)
+	scaleY := float32(originalHeight) / float32(targetHeight)
+	scale := scaleX
+	if scaleY < scaleX {
+		scale = scaleY
+	}
+	
+	// 计算实际缩放后的尺寸
+	scaledWidth := int(originalWidth / scale)
+	scaledHeight := int(originalHeight / scale)
+	
+	// 计算padding偏移
+	padX := float32(targetWidth - scaledWidth) / 2.0
+	padY := float32(targetHeight - scaledHeight) / 2.0
+	
+	// 转换坐标：先减去padding偏移，再应用缩放
 	for i := range detections {
-		detections[i].Box[0] *= scaleX // x1
-		detections[i].Box[1] *= scaleY // y1
-		detections[i].Box[2] *= scaleX // x2
-		detections[i].Box[3] *= scaleY // y2
+		detections[i].Box[0] = (detections[i].Box[0] - padX) * scale // x1
+		detections[i].Box[1] = (detections[i].Box[1] - padY) * scale // y1
+		detections[i].Box[2] = (detections[i].Box[2] - padX) * scale // x2
+		detections[i].Box[3] = (detections[i].Box[3] - padY) * scale // y2
 	}
 
 	// 应用非极大抑制
@@ -1548,22 +1564,38 @@ func (y *YOLO) detectWithPreprocessedData(inputData []float32, img image.Image) 
 	detections := y.parseDetections(outputTensor.GetData(), actualOutputShape)
 
 	// 将坐标从模型输入尺寸转换回原始图像尺寸
-	var scaleX, scaleY float32
+	// 需要考虑resizeWithPadding的影响
+	var targetWidth, targetHeight int
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
-		// 使用自定义的宽度和高度
-		scaleX = originalWidth / float32(y.config.InputWidth)
-		scaleY = originalHeight / float32(y.config.InputHeight)
+		targetWidth = y.config.InputWidth
+		targetHeight = y.config.InputHeight
 	} else {
-		// 使用正方形尺寸
-		scaleX = originalWidth / float32(y.config.InputSize)
-		scaleY = originalHeight / float32(y.config.InputSize)
+		targetWidth = y.config.InputSize
+		targetHeight = y.config.InputSize
 	}
 	
+	// 计算缩放比例和padding偏移
+	scaleX := float32(originalWidth) / float32(targetWidth)
+	scaleY := float32(originalHeight) / float32(targetHeight)
+	scale := scaleX
+	if scaleY < scaleX {
+		scale = scaleY
+	}
+	
+	// 计算实际缩放后的尺寸
+	scaledWidth := int(originalWidth / scale)
+	scaledHeight := int(originalHeight / scale)
+	
+	// 计算padding偏移
+	padX := float32(targetWidth - scaledWidth) / 2.0
+	padY := float32(targetHeight - scaledHeight) / 2.0
+	
+	// 转换坐标：先减去padding偏移，再应用缩放
 	for i := range detections {
-		detections[i].Box[0] *= scaleX // x1
-		detections[i].Box[1] *= scaleY // y1
-		detections[i].Box[2] *= scaleX // x2
-		detections[i].Box[3] *= scaleY // y2
+		detections[i].Box[0] = (detections[i].Box[0] - padX) * scale // x1
+		detections[i].Box[1] = (detections[i].Box[1] - padY) * scale // y1
+		detections[i].Box[2] = (detections[i].Box[2] - padX) * scale // x2
+		detections[i].Box[3] = (detections[i].Box[3] - padY) * scale // y2
 	}
 
 	// 应用非极大抑制
