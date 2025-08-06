@@ -193,11 +193,11 @@ func (svp *SimpleVideoProcessor) drawBBoxOnImage(img draw.Image, bbox [4]float32
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	// 计算边界框坐标
-	x1 := int(bbox[0] * float32(width))
-	y1 := int(bbox[1] * float32(height))
-	x2 := int(bbox[2] * float32(width))
-	y2 := int(bbox[3] * float32(height))
+	// 检测结果坐标已经是像素坐标，无需再次转换
+	x1 := int(bbox[0])
+	y1 := int(bbox[1])
+	x2 := int(bbox[2])
+	y2 := int(bbox[3])
 
 	// 确保坐标在图像范围内
 	x1 = int(maxFloat32(0, minFloat32(float32(x1), float32(width-1))))
@@ -246,9 +246,9 @@ func (svp *SimpleVideoProcessor) drawLabelOnImage(img *image.RGBA, label string,
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	// 计算标签位置
-	x := int(bbox[0] * float32(width))
-	y := int(bbox[1] * float32(height)) - 20
+	// 检测结果坐标已经是像素坐标，无需再次转换
+	x := int(bbox[0])
+	y := int(bbox[1]) - 20
 
 	// 确保标签在图像范围内
 	if x < 0 {
