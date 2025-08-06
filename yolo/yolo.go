@@ -1449,7 +1449,7 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 
 // preprocessImageFromMemory 从内存图像预处理
 func (y *YOLO) preprocessImageFromMemory(img image.Image) ([]float32, error) {
-	// 根据配置调整大小，直接缩放（不保持宽高比）
+	// 直接缩放到目标尺寸，与坐标转换逻辑保持一致
 	var resized image.Image
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
 		// 使用自定义的宽度和高度

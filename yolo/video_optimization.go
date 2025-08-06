@@ -656,8 +656,8 @@ func (vo *VideoOptimization) extremeFastResize(img image.Image, width, height in
 		return img // 无需缩放，直接返回
 	}
 	
-	// 使用保持宽高比的缩放方法
-	return vo.resizeWithPadding(img, width, height)
+	// 使用直接缩放，与坐标转换逻辑保持一致
+	return imaging.Resize(img, width, height, imaging.NearestNeighbor)
 }
 
 // resizeWithPadding 保持宽高比的缩放和填充
