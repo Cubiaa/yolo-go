@@ -1419,38 +1419,22 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 	detections := y.parseDetections(outputTensor.GetData(), actualOutputShape)
 
 	// 将坐标从模型输入尺寸转换回原始图像尺寸
-	// 需要考虑resizeWithPadding的影响
-	var targetWidth, targetHeight int
+	var scaleX, scaleY float32
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
-		targetWidth = y.config.InputWidth
-		targetHeight = y.config.InputHeight
+		// 使用自定义的宽度和高度
+		scaleX = originalWidth / float32(y.config.InputWidth)
+		scaleY = originalHeight / float32(y.config.InputHeight)
 	} else {
-		targetWidth = y.config.InputSize
-		targetHeight = y.config.InputSize
+		// 使用正方形尺寸
+		scaleX = originalWidth / float32(y.config.InputSize)
+		scaleY = originalHeight / float32(y.config.InputSize)
 	}
 	
-	// 计算缩放比例（与resizeWithPadding中的逻辑一致）
-	scaleX := float32(targetWidth) / originalWidth
-	scaleY := float32(targetHeight) / originalHeight
-	scale := scaleX
-	if scaleY < scaleX {
-		scale = scaleY
-	}
-	
-	// 计算缩放后的尺寸
-	scaledWidth := originalWidth * scale
-	scaledHeight := originalHeight * scale
-	
-	// 计算padding偏移（图像在目标尺寸中的居中位置）
-	offsetX := (float32(targetWidth) - scaledWidth) / 2.0
-	offsetY := (float32(targetHeight) - scaledHeight) / 2.0
-	
-	// 转换坐标：先减去padding偏移，再除以缩放比例
 	for i := range detections {
-		detections[i].Box[0] = (detections[i].Box[0] - offsetX) / scale // x1
-		detections[i].Box[1] = (detections[i].Box[1] - offsetY) / scale // y1
-		detections[i].Box[2] = (detections[i].Box[2] - offsetX) / scale // x2
-		detections[i].Box[3] = (detections[i].Box[3] - offsetY) / scale // y2
+		detections[i].Box[0] *= scaleX // x1
+		detections[i].Box[1] *= scaleY // y1
+		detections[i].Box[2] *= scaleX // x2
+		detections[i].Box[3] *= scaleY // y2
 	}
 
 	// 应用非极大抑制
@@ -1465,14 +1449,14 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 
 // preprocessImageFromMemory 从内存图像预处理
 func (y *YOLO) preprocessImageFromMemory(img image.Image) ([]float32, error) {
-	// 根据配置调整大小，保持宽高比
+	// 根据配置调整大小，直接缩放（不保持宽高比）
 	var resized image.Image
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
 		// 使用自定义的宽度和高度
-		resized = y.resizeWithPadding(img, y.config.InputWidth, y.config.InputHeight)
+		resized = imaging.Resize(img, y.config.InputWidth, y.config.InputHeight, imaging.Lanczos)
 	} else {
 		// 使用正方形输入尺寸
-		resized = y.resizeWithPadding(img, y.config.InputSize, y.config.InputSize)
+		resized = imaging.Resize(img, y.config.InputSize, y.config.InputSize, imaging.Lanczos)
 	}
 
 	// 转换为RGB并归一化
@@ -1566,38 +1550,22 @@ func (y *YOLO) detectWithPreprocessedData(inputData []float32, img image.Image) 
 	detections := y.parseDetections(outputTensor.GetData(), actualOutputShape)
 
 	// 将坐标从模型输入尺寸转换回原始图像尺寸
-	// 需要考虑resizeWithPadding的影响
-	var targetWidth, targetHeight int
+	var scaleX, scaleY float32
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
-		targetWidth = y.config.InputWidth
-		targetHeight = y.config.InputHeight
+		// 使用自定义的宽度和高度
+		scaleX = originalWidth / float32(y.config.InputWidth)
+		scaleY = originalHeight / float32(y.config.InputHeight)
 	} else {
-		targetWidth = y.config.InputSize
-		targetHeight = y.config.InputSize
+		// 使用正方形尺寸
+		scaleX = originalWidth / float32(y.config.InputSize)
+		scaleY = originalHeight / float32(y.config.InputSize)
 	}
 	
-	// 计算缩放比例（与resizeWithPadding中的逻辑一致）
-	scaleX := float32(targetWidth) / originalWidth
-	scaleY := float32(targetHeight) / originalHeight
-	scale := scaleX
-	if scaleY < scaleX {
-		scale = scaleY
-	}
-	
-	// 计算缩放后的尺寸
-	scaledWidth := originalWidth * scale
-	scaledHeight := originalHeight * scale
-	
-	// 计算padding偏移（图像在目标尺寸中的居中位置）
-	offsetX := (float32(targetWidth) - scaledWidth) / 2.0
-	offsetY := (float32(targetHeight) - scaledHeight) / 2.0
-	
-	// 转换坐标：先减去padding偏移，再除以缩放比例
 	for i := range detections {
-		detections[i].Box[0] = (detections[i].Box[0] - offsetX) / scale // x1
-		detections[i].Box[1] = (detections[i].Box[1] - offsetY) / scale // y1
-		detections[i].Box[2] = (detections[i].Box[2] - offsetX) / scale // x2
-		detections[i].Box[3] = (detections[i].Box[3] - offsetY) / scale // y2
+		detections[i].Box[0] *= scaleX // x1
+		detections[i].Box[1] *= scaleY // y1
+		detections[i].Box[2] *= scaleX // x2
+		detections[i].Box[3] *= scaleY // y2
 	}
 
 	// 应用非极大抑制
