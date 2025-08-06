@@ -1097,20 +1097,22 @@ func max(a, b float32) float32 {
 // resizeWithPadding 保持宽高比缩放图像并填充到目标尺寸
 func (y *YOLO) resizeWithPadding(img image.Image, targetWidth, targetHeight int) image.Image {
 	bounds := img.Bounds()
-	origWidth := float64(bounds.Dx())
-	origHeight := float64(bounds.Dy())
+	origWidth := float32(bounds.Dx())
+	origHeight := float32(bounds.Dy())
 
-	// 计算缩放比例，保持宽高比
-	scaleX := float64(targetWidth) / origWidth
-	scaleY := float64(targetHeight) / origHeight
+	// 计算缩放比例，保持宽高比（与坐标转换逻辑保持一致）
+	scaleX := float32(targetWidth) / origWidth
+	scaleY := float32(targetHeight) / origHeight
 	scale := scaleX
 	if scaleY < scaleX {
 		scale = scaleY
 	}
 
 	// 计算缩放后的尺寸
-	newWidth := int(origWidth * scale)
-	newHeight := int(origHeight * scale)
+	scaledWidth := origWidth * scale
+	scaledHeight := origHeight * scale
+	newWidth := int(scaledWidth)
+	newHeight := int(scaledHeight)
 
 	// 缩放图像
 	resized := imaging.Resize(img, newWidth, newHeight, imaging.Lanczos)
@@ -1124,9 +1126,9 @@ func (y *YOLO) resizeWithPadding(img image.Image, targetWidth, targetHeight int)
 		}
 	}
 
-	// 计算居中位置
-	offsetX := (targetWidth - newWidth) / 2
-	offsetY := (targetHeight - newHeight) / 2
+	// 计算居中位置（与坐标转换逻辑保持一致）
+	offsetX := int((float32(targetWidth) - scaledWidth) / 2.0)
+	offsetY := int((float32(targetHeight) - scaledHeight) / 2.0)
 
 	// 将缩放后的图像粘贴到中心位置
 	draw.Draw(padded, image.Rect(offsetX, offsetY, offsetX+newWidth, offsetY+newHeight), 
