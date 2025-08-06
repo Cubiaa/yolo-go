@@ -1427,28 +1427,28 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 		targetHeight = y.config.InputSize
 	}
 	
-	// 计算缩放比例和padding偏移
-	scaleX := float32(originalWidth) / float32(targetWidth)
-	scaleY := float32(originalHeight) / float32(targetHeight)
+	// 计算缩放比例（与resizeWithPadding中的逻辑一致）
+	scaleX := float32(targetWidth) / originalWidth
+	scaleY := float32(targetHeight) / originalHeight
 	scale := scaleX
 	if scaleY < scaleX {
 		scale = scaleY
 	}
 	
-	// 计算实际缩放后的尺寸
-	scaledWidth := int(originalWidth / scale)
-	scaledHeight := int(originalHeight / scale)
+	// 计算缩放后的尺寸
+	scaledWidth := originalWidth * scale
+	scaledHeight := originalHeight * scale
 	
-	// 计算padding偏移
-	padX := float32(targetWidth - scaledWidth) / 2.0
-	padY := float32(targetHeight - scaledHeight) / 2.0
+	// 计算padding偏移（图像在目标尺寸中的居中位置）
+	offsetX := (float32(targetWidth) - scaledWidth) / 2.0
+	offsetY := (float32(targetHeight) - scaledHeight) / 2.0
 	
-	// 转换坐标：先减去padding偏移，再应用缩放
+	// 转换坐标：先减去padding偏移，再除以缩放比例
 	for i := range detections {
-		detections[i].Box[0] = (detections[i].Box[0] - padX) * scale // x1
-		detections[i].Box[1] = (detections[i].Box[1] - padY) * scale // y1
-		detections[i].Box[2] = (detections[i].Box[2] - padX) * scale // x2
-		detections[i].Box[3] = (detections[i].Box[3] - padY) * scale // y2
+		detections[i].Box[0] = (detections[i].Box[0] - offsetX) / scale // x1
+		detections[i].Box[1] = (detections[i].Box[1] - offsetY) / scale // y1
+		detections[i].Box[2] = (detections[i].Box[2] - offsetX) / scale // x2
+		detections[i].Box[3] = (detections[i].Box[3] - offsetY) / scale // y2
 	}
 
 	// 应用非极大抑制
@@ -1574,28 +1574,28 @@ func (y *YOLO) detectWithPreprocessedData(inputData []float32, img image.Image) 
 		targetHeight = y.config.InputSize
 	}
 	
-	// 计算缩放比例和padding偏移
-	scaleX := float32(originalWidth) / float32(targetWidth)
-	scaleY := float32(originalHeight) / float32(targetHeight)
+	// 计算缩放比例（与resizeWithPadding中的逻辑一致）
+	scaleX := float32(targetWidth) / originalWidth
+	scaleY := float32(targetHeight) / originalHeight
 	scale := scaleX
 	if scaleY < scaleX {
 		scale = scaleY
 	}
 	
-	// 计算实际缩放后的尺寸
-	scaledWidth := int(originalWidth / scale)
-	scaledHeight := int(originalHeight / scale)
+	// 计算缩放后的尺寸
+	scaledWidth := originalWidth * scale
+	scaledHeight := originalHeight * scale
 	
-	// 计算padding偏移
-	padX := float32(targetWidth - scaledWidth) / 2.0
-	padY := float32(targetHeight - scaledHeight) / 2.0
+	// 计算padding偏移（图像在目标尺寸中的居中位置）
+	offsetX := (float32(targetWidth) - scaledWidth) / 2.0
+	offsetY := (float32(targetHeight) - scaledHeight) / 2.0
 	
-	// 转换坐标：先减去padding偏移，再应用缩放
+	// 转换坐标：先减去padding偏移，再除以缩放比例
 	for i := range detections {
-		detections[i].Box[0] = (detections[i].Box[0] - padX) * scale // x1
-		detections[i].Box[1] = (detections[i].Box[1] - padY) * scale // y1
-		detections[i].Box[2] = (detections[i].Box[2] - padX) * scale // x2
-		detections[i].Box[3] = (detections[i].Box[3] - padY) * scale // y2
+		detections[i].Box[0] = (detections[i].Box[0] - offsetX) / scale // x1
+		detections[i].Box[1] = (detections[i].Box[1] - offsetY) / scale // y1
+		detections[i].Box[2] = (detections[i].Box[2] - offsetX) / scale // x2
+		detections[i].Box[3] = (detections[i].Box[3] - offsetY) / scale // y2
 	}
 
 	// 应用非极大抑制
