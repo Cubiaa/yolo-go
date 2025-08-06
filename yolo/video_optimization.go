@@ -130,14 +130,24 @@ func (vo *VideoOptimization) asyncWorker() {
 		// 执行预处理
 		data, err := vo.extremePreprocessImage(task.img, task.width, task.height)
 		
-		// 返回结果
-		vo.processDone <- &ProcessResult{
+		// 创建结果
+		result := &ProcessResult{
 			data: data,
 			err:  err,
 			id:   task.id,
 		}
 		
-		vo.workerPool <- struct{}{} // 释放工作许可
+		// 先释放工作许可，避免死锁
+		vo.workerPool <- struct{}{}
+		
+		// 非阻塞发送结果，避免死锁
+		select {
+		case vo.processDone <- result:
+			// 成功发送结果
+		default:
+			// 结果通道满时丢弃结果，避免死锁
+			// 在实际应用中可以考虑记录日志或其他处理方式
+		}
 	}
 }
 
@@ -150,7 +160,12 @@ func (vo *VideoOptimization) OptimizedPreprocessImage(img image.Image, inputWidt
 func (vo *VideoOptimization) extremePreprocessImage(img image.Image, inputWidth, inputHeight int) ([]float32, error) {
 	// 从预处理池获取缓冲区
 	buf := vo.preprocessPool.Get().([]float32)
-	defer vo.preprocessPool.Put(buf)
+	defer func() {
+		// 确保归还到池中的缓冲区大小合理，避免内存泄漏
+		if len(buf) <= 3*1024*1024 { // 最大1024x1024的缓冲区
+			vo.preprocessPool.Put(buf)
+		}
+	}()
 
 	// 确保缓冲区大小足够
 	requiredSize := 3 * inputWidth * inputHeight
@@ -162,11 +177,17 @@ func (vo *VideoOptimization) extremePreprocessImage(img image.Image, inputWidth,
 	resized := vo.extremeFastResize(img, inputWidth, inputHeight)
 
 	// 极速归一化 - 并行处理
+	var result []float32
 	if rgba, ok := resized.(*image.RGBA); ok {
-		return vo.extremeFastNormalizeRGBA(rgba, buf), nil
+		result = vo.extremeFastNormalizeRGBA(rgba, buf)
 	} else {
-		return vo.extremeFastNormalize(resized, buf), nil
+		result = vo.extremeFastNormalize(resized, buf)
 	}
+
+	// 创建结果的副本，避免返回池中的缓冲区引用
+	output := make([]float32, len(result))
+	copy(output, result)
+	return output, nil
 }
 
 // fastResize 快速图像缩放
@@ -418,7 +439,10 @@ func (vo *VideoOptimization) BatchDetectImages(detector *YOLO, images []image.Im
 
 	results := make([][]Detection, len(images))
 	var wg sync.WaitGroup
+	var mu sync.Mutex // 保护results切片的并发写入
 	errorChan := make(chan error, len(images))
+	var firstError error
+	var errorOnce sync.Once
 
 	// 并行批处理
 	for i := 0; i < len(images); i += batchSize {
@@ -433,10 +457,16 @@ func (vo *VideoOptimization) BatchDetectImages(detector *YOLO, images []image.Im
 			for j := start; j < end; j++ {
 				detections, err := vo.OptimizedDetectImage(detector, images[j])
 				if err != nil {
-					errorChan <- err
+					// 只记录第一个错误，避免通道阻塞
+					errorOnce.Do(func() {
+						firstError = err
+					})
 					return
 				}
+				// 使用互斥锁保护并发写入
+				mu.Lock()
 				results[j] = detections
+				mu.Unlock()
 			}
 		}(i, end)
 	}
@@ -444,9 +474,9 @@ func (vo *VideoOptimization) BatchDetectImages(detector *YOLO, images []image.Im
 	wg.Wait()
 	close(errorChan)
 
-	// 检查错误
-	if err := <-errorChan; err != nil {
-		return nil, err
+	// 检查是否有错误
+	if firstError != nil {
+		return nil, firstError
 	}
 
 	return results, nil
@@ -493,6 +523,21 @@ func (vo *VideoOptimization) GetAsyncResult() *ProcessResult {
 	}
 }
 
+// GetAsyncResultBlocking 阻塞获取异步处理结果
+func (vo *VideoOptimization) GetAsyncResultBlocking() *ProcessResult {
+	return <-vo.processDone
+}
+
+// HasPendingResults 检查是否有待处理的结果
+func (vo *VideoOptimization) HasPendingResults() bool {
+	return len(vo.processDone) > 0
+}
+
+// GetQueueStatus 获取队列状态信息
+func (vo *VideoOptimization) GetQueueStatus() (asyncQueueLen, processDoneLen, availableWorkers int) {
+	return len(vo.asyncQueue), len(vo.processDone), len(vo.workerPool)
+}
+
 // GetMaxBatchSize 获取最大批处理大小
 func (vo *VideoOptimization) GetMaxBatchSize() int {
 	return vo.maxBatchSize
@@ -501,4 +546,36 @@ func (vo *VideoOptimization) GetMaxBatchSize() int {
 // GetParallelWorkers 获取并行工作线程数
 func (vo *VideoOptimization) GetParallelWorkers() int {
 	return vo.parallelWorkers
+}
+
+// Close 关闭VideoOptimization，清理资源
+func (vo *VideoOptimization) Close() {
+	// 关闭异步队列，这会导致所有asyncWorker退出
+	if vo.asyncQueue != nil {
+		close(vo.asyncQueue)
+	}
+	
+	// 清空结果通道
+	if vo.processDone != nil {
+		for {
+			select {
+			case <-vo.processDone:
+				// 继续清空
+			default:
+				// 通道已空，退出
+				close(vo.processDone)
+				return
+			}
+		}
+	}
+}
+
+// IsHealthy 检查VideoOptimization的健康状态
+func (vo *VideoOptimization) IsHealthy() bool {
+	if vo.asyncQueue == nil || vo.processDone == nil || vo.workerPool == nil {
+		return false
+	}
+	
+	// 检查是否有可用的工作线程
+	return len(vo.workerPool) > 0
 }
