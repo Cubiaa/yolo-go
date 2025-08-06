@@ -131,51 +131,51 @@ func NewVideoOptimization(enableGPU bool) *VideoOptimization {
 
 // NewVideoOptimizationWithCUDA 创建带CUDA加速的视频优化实例
 func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) *VideoOptimization {
-	// 极致性能配置 - 不计成本
+	// 平衡性能与内存使用
 	cpuCores := runtime.NumCPU()
 	
-	// 疯狂压榨GPU - 大幅增加批处理大小
-	batchSize := cpuCores * 4 // 基础批处理
-	maxBatchSize := cpuCores * 16 // 最大批处理，疯狂模式
-	parallelWorkers := cpuCores * 8 // 并行工作线程数
+	// 合理的批处理大小，避免内存不足
+	batchSize := cpuCores * 2 // 基础批处理
+	maxBatchSize := cpuCores * 4 // 最大批处理，平衡模式
+	parallelWorkers := cpuCores * 2 // 并行工作线程数
 	
 	if enableGPU {
-		// GPU模式下进一步增加批处理
-		batchSize = cpuCores * 8
-		maxBatchSize = cpuCores * 32 // GPU疯狂模式
-		parallelWorkers = cpuCores * 16
+		// GPU模式下适度增加批处理
+		batchSize = cpuCores * 3
+		maxBatchSize = cpuCores * 6 // GPU优化模式
+		parallelWorkers = cpuCores * 3
 	}
 	
-	// CUDA模式下进一步优化
+	// CUDA模式下进一步优化，但控制内存使用
 	if enableCUDA {
-		batchSize = cpuCores * 16 // CUDA疯狂批处理
-		maxBatchSize = cpuCores * 64 // CUDA极致模式
-		parallelWorkers = cpuCores * 32 // CUDA并行工作线程
+		batchSize = cpuCores * 4 // CUDA批处理
+		maxBatchSize = cpuCores * 8 // CUDA优化模式
+		parallelWorkers = cpuCores * 4 // CUDA并行工作线程
 	}
 
-	// 预分配大量内存缓冲区
+	// 预分配合理的内存缓冲区
 	preprocessBuf := make([][]float32, batchSize)
 	memoryBuffer := make([][]float32, maxBatchSize)
 	for i := range memoryBuffer {
-		memoryBuffer[i] = make([]float32, 3*1024*1024) // 预分配1024x1024缓冲区
+		memoryBuffer[i] = make([]float32, 3*640*640) // 预分配640x640缓冲区
 	}
 
-	// 创建多个对象池用于极致性能
+	// 创建对象池，使用合理的缓冲区大小
 	imagePool := &sync.Pool{
 		New: func() interface{} {
-			return make([]float32, 3*1024*1024) // 更大的缓冲区
+			return make([]float32, 3*640*640) // 640x640缓冲区
 		},
 	}
 	
 	preprocessPool := &sync.Pool{
 		New: func() interface{} {
-			return make([]float32, 3*1024*1024)
+			return make([]float32, 3*640*640)
 		},
 	}
 	
 	resultPool := &sync.Pool{
 		New: func() interface{} {
-			return make([]Detection, 0, 1000) // 预分配检测结果
+			return make([]Detection, 0, 100) // 预分配检测结果
 		},
 	}
 
