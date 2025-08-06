@@ -144,19 +144,33 @@ type YOLO struct {
 	// 模型信息
 	modelInputShape  []int64  // 模型实际输入形状
 	modelOutputShape []int64  // 模型实际输出形状
+	// GPU极致优化模块
+	optimization *VideoOptimization
 }
 
 // NewYOLO 创建新的YOLO检测器（配置文件必须，YOLOConfig可选）
 func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error) {
+	// 使用传入的配置，如果没有则使用默认配置
+	var yoloConfig *YOLOConfig
+	if len(config) > 0 && config[0] != nil {
+		yoloConfig = config[0]
+	} else {
+		yoloConfig = DefaultConfig()
+	}
+
 	// 加载配置文件（必须）
 	configManager := NewConfigManager(configPath)
 	err := configManager.LoadConfig()
 	if err != nil {
-		// 如果配置文件不存在，尝试创建默认配置
-		fmt.Printf("⚠️  配置文件不存在，创建默认配置: %v\n", err)
-		err = configManager.CreateDefaultConfig()
-		if err != nil {
-			return nil, fmt.Errorf("创建默认配置文件失败: %v", err)
+		// 只有当 AutoCreateConfig 为 true 时才自动创建配置文件
+		if yoloConfig.AutoCreateConfig {
+			fmt.Printf("⚠️  配置文件不存在，创建默认配置: %v\n", err)
+			err = configManager.CreateDefaultConfig()
+			if err != nil {
+				return nil, fmt.Errorf("创建默认配置文件失败: %v", err)
+			}
+		} else {
+			fmt.Printf("⚠️  配置文件不存在，跳过创建: %v\n", err)
 		}
 	}
 
@@ -179,14 +193,6 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 			"book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
 		}
 		SetClasses(defaultClasses)
-	}
-
-	// 使用传入的配置，如果没有则使用默认配置
-	var yoloConfig *YOLOConfig
-	if len(config) > 0 && config[0] != nil {
-		yoloConfig = config[0]
-	} else {
-		yoloConfig = DefaultConfig()
 	}
 
 	// 设置ONNX Runtime库路径
@@ -354,12 +360,22 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 	modelOutputShape = []int64{1, 84, 8400} // 标准YOLO输出格式
 	fmt.Printf("📊 输出形状: %v (标准YOLO格式)\n", modelOutputShape)
 
-	return &YOLO{
+	// 创建YOLO实例
+	yolo := &YOLO{
 		config:           yoloConfig,
 		session:          session,
 		modelInputShape:  modelInputShape,
 		modelOutputShape: modelOutputShape,
-	}, nil
+	}
+
+	// 初始化GPU极致优化模块
+	yolo.optimization = NewVideoOptimization(yoloConfig.UseGPU)
+	fmt.Printf("🚀 GPU极致优化模块已初始化 (GPU: %v, 批处理大小: %d, 并行工作线程: %d)\n", 
+		yolo.optimization.IsGPUEnabled(), 
+		yolo.optimization.GetBatchSize(), 
+		yolo.optimization.GetParallelWorkers())
+
+	return yolo, nil
 }
 
 // NewYOLOWithConfig 创建新的YOLO检测器（支持配置文件）
@@ -396,6 +412,26 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 	// 如果没有设置运行时配置，使用默认配置
 	if y.runtimeConfig == nil {
 		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
+	// 如果启用了GPU且优化模块可用，使用极致优化检测
+	if y.config.UseGPU && y.optimization != nil {
+		// 加载图像
+		img, err := imaging.Open(imagePath)
+		if err != nil {
+			return nil, fmt.Errorf("无法打开图像: %v", err)
+		}
+		
+		// 使用极致优化检测
+		detections, err := y.optimization.OptimizedDetectImage(y, img)
+		if err != nil {
+			return nil, fmt.Errorf("GPU极致优化检测失败: %v", err)
+		}
+		
+		fmt.Printf("🚀 使用GPU极致优化检测 (批处理大小: %d, 并行工作线程: %d)\n", 
+			y.optimization.GetBatchSize(), y.optimization.GetParallelWorkers())
+		
+		return detections, nil
 	}
 
 	// 加载图像以获取原始尺寸
@@ -1267,6 +1303,15 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 		y.runtimeConfig = DefaultDetectionOptions()
 	}
 
+	// 如果启用了GPU且优化模块可用，使用极致优化检测
+	if y.config.UseGPU && y.optimization != nil {
+		detections, err := y.optimization.OptimizedDetectImage(y, img)
+		if err != nil {
+			return nil, fmt.Errorf("GPU极致优化检测失败: %v", err)
+		}
+		return detections, nil
+	}
+
 	// 获取原始图像尺寸
 	originalBounds := img.Bounds()
 	originalWidth := float32(originalBounds.Dx())
@@ -1393,6 +1438,105 @@ func (y *YOLO) preprocessImageFromMemory(img image.Image) ([]float32, error) {
 	}
 
 	return data, nil
+}
+
+// detectWithPreprocessedData 使用预处理数据进行检测（优化版本）
+func (y *YOLO) detectWithPreprocessedData(inputData []float32, img image.Image) ([]Detection, error) {
+	// 如果没有设置运行时配置，使用默认配置
+	if y.runtimeConfig == nil {
+		y.runtimeConfig = DefaultDetectionOptions()
+	}
+
+	// 获取原始图像尺寸
+	originalBounds := img.Bounds()
+	originalWidth := float32(originalBounds.Dx())
+	originalHeight := float32(originalBounds.Dy())
+
+	// 直接使用传入的预处理数据，跳过预处理步骤
+
+	// 创建输入张量
+	var inputShape ort.Shape
+	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		inputShape = ort.NewShape(1, 3, int64(y.config.InputHeight), int64(y.config.InputWidth))
+	} else {
+		// 使用正方形尺寸
+		inputShape = ort.NewShape(1, 3, int64(y.config.InputSize), int64(y.config.InputSize))
+	}
+	inputTensor, err := ort.NewTensor(inputShape, inputData)
+	if err != nil {
+		return nil, fmt.Errorf("无法创建输入张量: %v", err)
+	}
+	defer inputTensor.Destroy()
+
+	// 创建输出张量（智能适配模型输出形状）
+	var outputShape ort.Shape
+	var outputDataSize int
+	
+	// 如果是第一次推理或者modelOutputShape包含动态维度，使用标准形状进行探测
+	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
+		// 使用标准YOLO输出形状进行第一次推理
+		outputShape = ort.NewShape(1, 84, 8400)
+		outputDataSize = 1 * 84 * 8400
+	} else {
+		// 使用已知的模型输出形状
+		outputShape = ort.NewShape(y.modelOutputShape...)
+		outputDataSize = 1
+		for _, dim := range y.modelOutputShape {
+			outputDataSize *= int(dim)
+		}
+	}
+	
+	outputData := make([]float32, outputDataSize)
+	outputTensor, err := ort.NewTensor(outputShape, outputData)
+	if err != nil {
+		return nil, fmt.Errorf("无法创建输出张量: %v", err)
+	}
+	defer outputTensor.Destroy()
+
+	// 运行推理
+	err = y.session.Run([]ort.Value{inputTensor}, []ort.Value{outputTensor})
+
+	if err != nil {
+		return nil, fmt.Errorf("推理失败: %v", err)
+	}
+
+	// 获取实际的输出形状并更新模型信息
+	actualOutputShape := outputTensor.GetShape()
+	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
+		y.modelOutputShape = actualOutputShape
+	}
+
+	// 解析检测结果
+	detections := y.parseDetections(outputTensor.GetData(), actualOutputShape)
+
+	// 将坐标从模型输入尺寸转换回原始图像尺寸
+	var scaleX, scaleY float32
+	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
+		// 使用自定义的宽度和高度
+		scaleX = originalWidth / float32(y.config.InputWidth)
+		scaleY = originalHeight / float32(y.config.InputHeight)
+	} else {
+		// 使用正方形尺寸
+		scaleX = originalWidth / float32(y.config.InputSize)
+		scaleY = originalHeight / float32(y.config.InputSize)
+	}
+	
+	for i := range detections {
+		detections[i].Box[0] *= scaleX // x1
+		detections[i].Box[1] *= scaleY // y1
+		detections[i].Box[2] *= scaleX // x2
+		detections[i].Box[3] *= scaleY // y2
+	}
+
+	// 应用非极大抑制
+	threshold := float32(0.5) // 默认值
+	if y.runtimeConfig != nil {
+		threshold = y.runtimeConfig.IOUThreshold
+	}
+	keep := y.nonMaxSuppression(detections, threshold)
+
+	return keep, nil
 }
 
 // 注意：已移除OpenCV依赖，使用Vidio库处理视频

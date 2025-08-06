@@ -11,23 +11,23 @@ import (
 
 // VidioVideoProcessor 使用Vidio库的视频处理器
 type VidioVideoProcessor struct {
-	detector *YOLO
-	options  *DetectionOptions // 检测配置选项
+	detector     *YOLO
+	optimization *VideoOptimization
 }
 
 // NewVidioVideoProcessor 创建Vidio视频处理器
 func NewVidioVideoProcessor(detector *YOLO) *VidioVideoProcessor {
 	return &VidioVideoProcessor{
-		detector: detector,
-		options:  nil, // 使用检测器的当前配置
+		detector:     detector,
+		optimization: NewVideoOptimization(detector.config.UseGPU),
 	}
 }
 
 // NewVidioVideoProcessorWithOptions 创建带配置选项的Vidio视频处理器
 func NewVidioVideoProcessorWithOptions(detector *YOLO, options *DetectionOptions) *VidioVideoProcessor {
 	return &VidioVideoProcessor{
-		detector: detector,
-		options:  options,
+		detector:     detector,
+		optimization: NewVideoOptimization(detector.config.UseGPU),
 	}
 }
 
@@ -57,10 +57,7 @@ func (vp *VidioVideoProcessor) ProcessVideo(inputPath string) ([]VideoDetectionR
 		var detections []Detection
 		var err error
 		
-		if vp.options != nil {
-			// 使用指定的检测选项
-			vp.detector.SetRuntimeConfig(vp.options)
-		}
+
 		
 		detections, err = vp.detector.detectImage(frameImg)
 		if err != nil {
@@ -88,7 +85,12 @@ func (vp *VidioVideoProcessor) ProcessVideo(inputPath string) ([]VideoDetectionR
 	return results, nil
 }
 
-// ProcessVideoWithCallback 处理视频并对每帧调用回调函数
+// GetOptimization 获取视频优化实例
+func (vp *VidioVideoProcessor) GetOptimization() *VideoOptimization {
+	return vp.optimization
+}
+
+// ProcessVideoWithCallback 处理视频并对每帧调用回调函数（优化版本）
 func (vp *VidioVideoProcessor) ProcessVideoWithCallback(inputPath string, callback func(VideoDetectionResult)) error {
 	// 打开视频文件
 	video, err := vidio.NewVideo(inputPath)
@@ -99,34 +101,29 @@ func (vp *VidioVideoProcessor) ProcessVideoWithCallback(inputPath string, callba
 
 	fmt.Printf("📹 视频信息: %dx%d, %.2f FPS, %d 帧\n",
 		video.Width(), video.Height(), video.FPS(), video.Frames())
+	fmt.Printf("🚀 性能优化: 批处理大小=%d, GPU加速=%v\n", vp.optimization.GetBatchSize(), vp.optimization.IsGPUEnabled())
 
 	frameCount := 0
+	startTime := time.Now()
 
-	// 逐帧读取视频
+
+
+	// 逐帧读取视频（优化版本）
 	for video.Read() {
 		frameCount++
 
 		// 将帧缓冲区转换为Go图像
 		frameImg := convertFrameBufferToImage(video.FrameBuffer(), video.Width(), video.Height())
 
-		// YOLO检测
-		var detections []Detection
-		var err error
-		
-		if vp.options != nil {
-			// 使用指定的检测选项
-			vp.detector.SetRuntimeConfig(vp.options)
-		}
-		
-		detections, err = vp.detector.detectImage(frameImg)
+		// 使用优化的检测方法
+		detections, err := vp.optimizedDetectImage(frameImg)
 		if err != nil {
-			// 极限性能模式：减少错误输出频率
+			// 减少错误输出频率
 			if frameCount%100 == 0 {
 				fmt.Printf("❌ 检测错误 (帧 %d): %v\n", frameCount, err)
 			}
 			detections = []Detection{}
 		}
-		// 极限性能模式：移除详细调试输出以提升速度
 
 		// 创建检测结果并调用回调
 		timestamp := time.Duration(float64(frameCount)/video.FPS()*1000) * time.Millisecond
@@ -138,14 +135,24 @@ func (vp *VidioVideoProcessor) ProcessVideoWithCallback(inputPath string, callba
 		}
 		callback(result)
 
-		// 进度提示
-		if frameCount%30 == 0 {
-			fmt.Printf("📊 已处理 %d/%d 帧...\n", frameCount, video.Frames())
+		// 性能监控和进度提示
+		if frameCount%100 == 0 {
+			elapsed := time.Since(startTime)
+			fps := float64(frameCount) / elapsed.Seconds()
+			fmt.Printf("📊 已处理 %d/%d 帧, 当前FPS: %.1f\n", frameCount, video.Frames(), fps)
 		}
 	}
 
-	fmt.Printf("✅ 视频处理完成！共处理 %d 帧\n", frameCount)
+	elapsed := time.Since(startTime)
+	avgFPS := float64(frameCount) / elapsed.Seconds()
+	fmt.Printf("✅ 视频处理完成！共处理 %d 帧, 平均FPS: %.1f, 总耗时: %v\n", frameCount, avgFPS, elapsed)
 	return nil
+}
+
+// optimizedDetectImage 优化的图像检测方法
+func (vp *VidioVideoProcessor) optimizedDetectImage(img image.Image) ([]Detection, error) {
+	// 使用优化模块进行检测
+	return vp.optimization.OptimizedDetectImage(vp.detector, img)
 }
 
 // SaveVideoWithDetections 保存带检测框的视频
@@ -215,6 +222,24 @@ func convertFrameBufferToImage(frameBuffer []byte, width, height int) image.Imag
 	copy(img.Pix, frameBuffer)
 	return img
 }
+
+// optimizedPreprocessImage 优化的图像预处理方法
+func (vp *VidioVideoProcessor) optimizedPreprocessImage(img image.Image) ([]float32, error) {
+	// 获取输入尺寸
+	var inputWidth, inputHeight int
+	if vp.detector.config.InputWidth > 0 && vp.detector.config.InputHeight > 0 {
+		inputWidth = vp.detector.config.InputWidth
+		inputHeight = vp.detector.config.InputHeight
+	} else {
+		inputWidth = vp.detector.config.InputSize
+		inputHeight = vp.detector.config.InputSize
+	}
+
+	// 使用优化模块进行预处理
+	return vp.optimization.OptimizedPreprocessImage(img, inputWidth, inputHeight)
+}
+
+
 
 // convertImageToFrameBuffer 将Go图像转换为帧缓冲区
 func convertImageToFrameBuffer(img image.Image) []byte {

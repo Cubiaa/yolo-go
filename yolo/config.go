@@ -14,6 +14,7 @@ type YOLOConfig struct {
 	UseGPU      bool   // 是否使用GPU
 	GPUDeviceID int    // GPU设备ID（默认0，仅在UseGPU=true时有效）
 	LibraryPath string // ONNX Runtime库路径
+	AutoCreateConfig bool // 是否自动创建配置文件（默认false）
 }
 
 // DetectionOptions 检测选项
@@ -92,6 +93,12 @@ func (c *YOLOConfig) WithInputDimensions(width, height int) *YOLOConfig {
 	c.InputWidth = width
 	c.InputHeight = height
 	c.InputSize = 0 // 清除正方形设置
+	return c
+}
+
+// WithAutoCreateConfig 设置是否自动创建配置文件
+func (c *YOLOConfig) WithAutoCreateConfig(autoCreate bool) *YOLOConfig {
+	c.AutoCreateConfig = autoCreate
 	return c
 }
 
