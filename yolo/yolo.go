@@ -142,8 +142,8 @@ type YOLO struct {
 	lastDetections *DetectionResults
 	lastImage      image.Image
 	// 模型信息
-	modelInputShape  []int64  // 模型实际输入形状
-	modelOutputShape []int64  // 模型实际输出形状
+	modelInputShape  []int64 // 模型实际输入形状
+	modelOutputShape []int64 // 模型实际输出形状
 	// GPU极致优化模块
 	optimization *VideoOptimization
 }
@@ -277,7 +277,7 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 				fmt.Printf("⚠️  创建CUDA选项失败: %v\n", err)
 			} else {
 				defer cudaOptions.Destroy()
-				
+
 				// 设置CUDA选项
 				optionsMap := map[string]string{
 					"device_id": fmt.Sprintf("%d", yoloConfig.GPUDeviceID),
@@ -340,11 +340,11 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 		session.Destroy()
 		return nil, fmt.Errorf("模型输入或输出信息为空")
 	}
-	
+
 	// 注意：InputOutputInfo结构体在onnxruntime_go v1.21.0中没有GetShape()方法
 	// 我们使用默认的输入输出形状，或者从配置中获取
 	var modelInputShape, modelOutputShape []int64
-	
+
 	// 根据配置设置输入形状
 	if yoloConfig.InputWidth > 0 && yoloConfig.InputHeight > 0 {
 		// 使用自定义的宽度和高度
@@ -355,7 +355,7 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 		modelInputShape = []int64{1, 3, int64(yoloConfig.InputSize), int64(yoloConfig.InputSize)}
 		fmt.Printf("📊 使用正方形输入形状: %dx%d -> %v\n", yoloConfig.InputSize, yoloConfig.InputSize, modelInputShape)
 	}
-	
+
 	// 输出形状设置为标准YOLO格式，避免动态维度导致的张量创建错误
 	modelOutputShape = []int64{1, 84, 8400} // 标准YOLO输出格式
 	fmt.Printf("📊 输出形状: %v (标准YOLO格式)\n", modelOutputShape)
@@ -370,10 +370,10 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 
 	// 初始化GPU极致优化模块，支持CUDA加速
 	yolo.optimization = NewVideoOptimizationWithCUDA(yoloConfig.UseGPU, yoloConfig.UseCUDA, yoloConfig.CUDADeviceID)
-	fmt.Printf("🚀 GPU极致优化模块已初始化 (GPU: %v, CUDA: %v, 批处理大小: %d, 并行工作线程: %d)\n", 
-		yolo.optimization.IsGPUEnabled(), 
+	fmt.Printf("🚀 GPU极致优化模块已初始化 (GPU: %v, CUDA: %v, 批处理大小: %d, 并行工作线程: %d)\n",
+		yolo.optimization.IsGPUEnabled(),
 		yolo.optimization.IsCUDAEnabled(),
-		yolo.optimization.GetBatchSize(), 
+		yolo.optimization.GetBatchSize(),
 		yolo.optimization.GetParallelWorkers())
 
 	return yolo, nil
@@ -422,16 +422,16 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 		if err != nil {
 			return nil, fmt.Errorf("无法打开图像: %v", err)
 		}
-		
+
 		// 使用极致优化检测
 		detections, err := y.optimization.OptimizedDetectImage(y, img)
 		if err != nil {
 			return nil, fmt.Errorf("GPU极致优化检测失败: %v", err)
 		}
-		
-		fmt.Printf("🚀 使用GPU极致优化检测 (批处理大小: %d, 并行工作线程: %d)\n", 
+
+		fmt.Printf("🚀 使用GPU极致优化检测 (批处理大小: %d, 并行工作线程: %d)\n",
 			y.optimization.GetBatchSize(), y.optimization.GetParallelWorkers())
-		
+
 		return detections, nil
 	}
 
@@ -470,7 +470,7 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 	// 创建输出张量（智能适配模型输出形状）
 	var outputShape ort.Shape
 	var outputDataSize int
-	
+
 	// 如果是第一次推理或者modelOutputShape包含动态维度，使用标准形状进行探测
 	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
 		// 使用标准YOLO输出形状进行第一次推理
@@ -486,7 +486,7 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 		}
 		fmt.Printf("📊 使用已知模型输出形状: %v\n", y.modelOutputShape)
 	}
-	
+
 	outputData := make([]float32, outputDataSize)
 	outputTensor, err := ort.NewTensor(outputShape, outputData)
 
@@ -522,7 +522,7 @@ func (y *YOLO) DetectImage(imagePath string) ([]Detection, error) {
 		scaleX = originalWidth / float32(y.config.InputSize)
 		scaleY = originalHeight / float32(y.config.InputSize)
 	}
-	
+
 	for i := range detections {
 		detections[i].Box[0] *= scaleX // x1
 		detections[i].Box[1] *= scaleY // y1
@@ -634,8 +634,6 @@ func (y *YOLO) Show(inputPath string, outputPath ...string) error {
 	}
 }
 
-
-
 // DetectVideoAdvanced 高级视频检测（支持更多选项）
 func (y *YOLO) DetectVideoAdvanced(inputPath, outputPath string, options VideoOptions) error {
 	if isVideoFile(inputPath) {
@@ -727,12 +725,12 @@ func (y *YOLO) parseDetections(outputData []float32, outputShape []int64) []Dete
 	numDetections := int(outputShape[2]) // 例如: 8400
 	numFeatures := int(outputShape[1])   // 例如: 84, 85, 等
 	numClasses := numFeatures - 4        // 动态计算类别数量 (总特征数 - 4个坐标)
-	
+
 	if numClasses <= 0 {
 		fmt.Printf("⚠️  无效的类别数量: %d (特征数: %d)\n", numClasses, numFeatures)
 		return nil
 	}
-	
+
 	fmt.Printf("📊 解析输出: %d个检测框, %d个特征, %d个类别\n", numDetections, numFeatures, numClasses)
 
 	var detections []Detection
@@ -844,7 +842,7 @@ func (y *YOLO) drawBBox(img draw.Image, bbox [4]float32, lineColor color.Color) 
 	x1 := int(max(0, minFloat32(float32(width-1), bbox[0])))
 	y1 := int(max(0, minFloat32(float32(height-1), bbox[1])))
 	x2 := int(max(0, minFloat32(float32(width-1), bbox[2])))
-	y2 := int(max(0, minFloat32(float32(width-1), bbox[3])))
+	y2 := int(max(0, minFloat32(float32(height-1), bbox[3])))
 
 	// 获取线条宽度
 	lineWidth := 1
@@ -1010,7 +1008,7 @@ func (y *YOLO) drawLabel(img *image.RGBA, label string, x, yPos int) {
 	// 设置字体和尺寸（支持自定义字体大小）
 	var face font.Face
 	var charWidth, textHeight int
-	
+
 	// 根据FontSize选择合适的字体
 	if y.runtimeConfig != nil && y.runtimeConfig.FontSize > 0 {
 		switch {
@@ -1037,7 +1035,7 @@ func (y *YOLO) drawLabel(img *image.RGBA, label string, x, yPos int) {
 		charWidth = 7
 		textHeight = 13
 	}
-	
+
 	textWidth := len(label) * charWidth
 	padding := 4
 
@@ -1131,7 +1129,7 @@ func (y *YOLO) resizeWithPadding(img image.Image, targetWidth, targetHeight int)
 	offsetY := int((float32(targetHeight) - scaledHeight) / 2.0)
 
 	// 将缩放后的图像粘贴到中心位置
-	draw.Draw(padded, image.Rect(offsetX, offsetY, offsetX+newWidth, offsetY+newHeight), 
+	draw.Draw(padded, image.Rect(offsetX, offsetY, offsetX+newWidth, offsetY+newHeight),
 		resized, image.Point{0, 0}, draw.Src)
 
 	return padded
@@ -1380,7 +1378,7 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 	// 创建输出张量（智能适配模型输出形状）
 	var outputShape ort.Shape
 	var outputDataSize int
-	
+
 	// 如果是第一次推理或者modelOutputShape包含动态维度，使用标准形状进行探测
 	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
 		// 使用标准YOLO输出形状进行第一次推理
@@ -1394,7 +1392,7 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 			outputDataSize *= int(dim)
 		}
 	}
-	
+
 	outputData := make([]float32, outputDataSize)
 	outputTensor, err := ort.NewTensor(outputShape, outputData)
 	if err != nil {
@@ -1429,7 +1427,7 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 		scaleX = originalWidth / float32(y.config.InputSize)
 		scaleY = originalHeight / float32(y.config.InputSize)
 	}
-	
+
 	for i := range detections {
 		detections[i].Box[0] *= scaleX // x1
 		detections[i].Box[1] *= scaleY // y1
@@ -1511,7 +1509,7 @@ func (y *YOLO) detectWithPreprocessedData(inputData []float32, img image.Image) 
 	// 创建输出张量（智能适配模型输出形状）
 	var outputShape ort.Shape
 	var outputDataSize int
-	
+
 	// 如果是第一次推理或者modelOutputShape包含动态维度，使用标准形状进行探测
 	if len(y.modelOutputShape) == 0 || containsDynamicDimension(y.modelOutputShape) {
 		// 使用标准YOLO输出形状进行第一次推理
@@ -1525,7 +1523,7 @@ func (y *YOLO) detectWithPreprocessedData(inputData []float32, img image.Image) 
 			outputDataSize *= int(dim)
 		}
 	}
-	
+
 	outputData := make([]float32, outputDataSize)
 	outputTensor, err := ort.NewTensor(outputShape, outputData)
 	if err != nil {
@@ -1560,7 +1558,7 @@ func (y *YOLO) detectWithPreprocessedData(inputData []float32, img image.Image) 
 		scaleX = originalWidth / float32(y.config.InputSize)
 		scaleY = originalHeight / float32(y.config.InputSize)
 	}
-	
+
 	for i := range detections {
 		detections[i].Box[0] *= scaleX // x1
 		detections[i].Box[1] *= scaleY // y1
@@ -1721,7 +1719,7 @@ func (y *YOLO) Detect(inputPath string, options *DetectionOptions, callbacks ...
 		strings.HasSuffix(strings.ToLower(inputPath), ".png") {
 		// 图片：直接检测
 		detections, err := y.DetectImage(inputPath)
-		
+
 		// 如果提供了回调函数，调用它
 		if len(callbacks) > 0 {
 			if callback, ok := callbacks[0].(func(VideoDetectionResult)); ok {
@@ -1742,7 +1740,7 @@ func (y *YOLO) Detect(inputPath string, options *DetectionOptions, callbacks ...
 				}
 			}
 		}
-		
+
 		if err != nil {
 			return nil, err
 		}
@@ -1825,7 +1823,7 @@ func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions, callba
 
 		// 实时更新状态
 		fmt.Printf("📊 摄像头帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
-		
+
 		// 如果提供了回调函数，调用它
 		if len(callback) > 0 && callback[0] != nil {
 			callback[0](result)
@@ -1846,8 +1844,6 @@ func (y *YOLO) DetectFromCamera(device string, options *DetectionOptions, callba
 
 	return y.lastDetections, nil
 }
-
-
 
 // DetectFromRTSP 从RTSP流进行实时检测，支持可选的回调函数
 func (y *YOLO) DetectFromRTSP(rtspURL string, options *DetectionOptions, callback ...func(VideoDetectionResult)) (*DetectionResults, error) {
@@ -1875,7 +1871,7 @@ func (y *YOLO) DetectFromRTSP(rtspURL string, options *DetectionOptions, callbac
 
 		// 实时更新状态
 		fmt.Printf("📊 RTSP帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
-		
+
 		// 如果提供了回调函数，调用它
 		if len(callback) > 0 && callback[0] != nil {
 			callback[0](result)
@@ -1896,8 +1892,6 @@ func (y *YOLO) DetectFromRTSP(rtspURL string, options *DetectionOptions, callbac
 
 	return y.lastDetections, nil
 }
-
-
 
 // DetectFromScreen 从屏幕录制进行实时检测，支持可选的回调函数
 func (y *YOLO) DetectFromScreen(options *DetectionOptions, callback ...func(VideoDetectionResult)) (*DetectionResults, error) {
@@ -1925,7 +1919,7 @@ func (y *YOLO) DetectFromScreen(options *DetectionOptions, callback ...func(Vide
 
 		// 实时更新状态
 		fmt.Printf("📊 屏幕帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
-		
+
 		// 如果提供了回调函数，调用它
 		if len(callback) > 0 && callback[0] != nil {
 			callback[0](result)
@@ -1946,8 +1940,6 @@ func (y *YOLO) DetectFromScreen(options *DetectionOptions, callback ...func(Vide
 
 	return y.lastDetections, nil
 }
-
-
 
 // DetectFromRTMP 从RTMP流进行实时检测，支持可选的回调函数
 func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions, callback ...func(VideoDetectionResult)) (*DetectionResults, error) {
@@ -1975,7 +1967,7 @@ func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions, callbac
 
 		// 实时更新状态
 		fmt.Printf("📊 RTMP帧 %d, 检测到 %d 个对象\n", frameCount, len(result.Detections))
-		
+
 		// 如果提供了回调函数，调用它
 		if len(callback) > 0 && callback[0] != nil {
 			callback[0](result)
@@ -1996,8 +1988,6 @@ func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions, callbac
 
 	return y.lastDetections, nil
 }
-
-
 
 // loadClassesFromYAML 从YAML文件加载类别列表
 // loadImageForCallback 加载图片用于回调
@@ -2086,11 +2076,11 @@ func (dr *DetectionResults) saveVideoWithFFmpeg(outputPath string) error {
 	args := []string{
 		"-r", fmt.Sprintf("%.0f", fps),
 		"-i", filepath.Join(tempDir, "frame_%04d.jpg"),
-		"-c:v", "libx264",        // 使用H.264编码器
-		"-crf", "18",            // CRF 18 视觉无损质量
-		"-preset", "slow",       // slow预设获得更好压缩
-		"-pix_fmt", "yuv420p",   // 使用yuv420p标准格式
-		"-y",                    // 覆盖输出文件
+		"-c:v", "libx264", // 使用H.264编码器
+		"-crf", "18", // CRF 18 视觉无损质量
+		"-preset", "slow", // slow预设获得更好压缩
+		"-pix_fmt", "yuv420p", // 使用yuv420p标准格式
+		"-y", // 覆盖输出文件
 		outputPath,
 	}
 

@@ -15,10 +15,10 @@ import (
 
 // VideoOptimization GPU优化相关的结构体和方法 - 疯狂调用稳定版 + CUDA加速
 type VideoOptimization struct {
-	batchSize       int
-	preprocessBuf   [][]float32
-	imagePool       *sync.Pool
-	enableGPU       bool
+	batchSize     int
+	preprocessBuf [][]float32
+	imagePool     *sync.Pool
+	enableGPU     bool
 	// 极致性能优化字段
 	maxBatchSize    int
 	workerPool      chan struct{}
@@ -28,15 +28,15 @@ type VideoOptimization struct {
 	memoryBuffer    [][]float32
 	asyncQueue      chan *ProcessTask
 	processDone     chan *ProcessResult
-	
+
 	// CUDA加速模块
 	cudaAccelerator *CUDAAccelerator
 	enableCUDA      bool
 	cudaDeviceID    int
-	
+
 	// 疯狂调用稳定性保障字段
 	circuitBreaker  *CircuitBreaker
-	rateLimiter    *RateLimiter
+	rateLimiter     *RateLimiter
 	resourceMonitor *ResourceMonitor
 	healthChecker   *HealthChecker
 	metrics         *PerformanceMetrics
@@ -82,24 +82,24 @@ const (
 
 // RateLimiter 限流器 - 控制调用频率
 type RateLimiter struct {
-	mu       sync.Mutex
-	tokens   int64
-	maxTokens int64
+	mu         sync.Mutex
+	tokens     int64
+	maxTokens  int64
 	refillRate int64
 	lastRefill time.Time
 }
 
 // ResourceMonitor 资源监控器 - 监控系统资源
 type ResourceMonitor struct {
-	mu              sync.RWMutex
-	memoryUsage     int64
-	goroutineCount  int64
-	cpuUsage        float64
-	maxMemory       int64
-	maxGoroutines   int64
-	maxCPU          float64
-	lastCheck       time.Time
-	checkInterval   time.Duration
+	mu             sync.RWMutex
+	memoryUsage    int64
+	goroutineCount int64
+	cpuUsage       float64
+	maxMemory      int64
+	maxGoroutines  int64
+	maxCPU         float64
+	lastCheck      time.Time
+	checkInterval  time.Duration
 }
 
 // HealthChecker 健康检查器 - 检查系统健康状态
@@ -134,23 +134,23 @@ func NewVideoOptimization(enableGPU bool) *VideoOptimization {
 func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) *VideoOptimization {
 	// 平衡性能与内存使用
 	cpuCores := runtime.NumCPU()
-	
+
 	// 合理的批处理大小，避免内存不足
-	batchSize := cpuCores * 2 // 基础批处理
-	maxBatchSize := cpuCores * 4 // 最大批处理，平衡模式
+	batchSize := cpuCores * 2       // 基础批处理
+	maxBatchSize := cpuCores * 4    // 最大批处理，平衡模式
 	parallelWorkers := cpuCores * 2 // 并行工作线程数
-	
+
 	if enableGPU {
 		// GPU模式下适度增加批处理
 		batchSize = cpuCores * 3
 		maxBatchSize = cpuCores * 6 // GPU优化模式
 		parallelWorkers = cpuCores * 3
 	}
-	
+
 	// CUDA模式下进一步优化，但控制内存使用
 	if enableCUDA {
-		batchSize = cpuCores * 4 // CUDA批处理
-		maxBatchSize = cpuCores * 8 // CUDA优化模式
+		batchSize = cpuCores * 4       // CUDA批处理
+		maxBatchSize = cpuCores * 8    // CUDA优化模式
 		parallelWorkers = cpuCores * 4 // CUDA并行工作线程
 	}
 
@@ -167,13 +167,13 @@ func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) 
 			return make([]float32, 3*640*640) // 640x640缓冲区
 		},
 	}
-	
+
 	preprocessPool := &sync.Pool{
 		New: func() interface{} {
 			return make([]float32, 3*640*640)
 		},
 	}
-	
+
 	resultPool := &sync.Pool{
 		New: func() interface{} {
 			return make([]Detection, 0, 100) // 预分配检测结果
@@ -184,7 +184,7 @@ func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) 
 	asyncQueue := make(chan *ProcessTask, maxBatchSize*2)
 	processDone := make(chan *ProcessResult, maxBatchSize*2)
 	workerPool := make(chan struct{}, parallelWorkers)
-	
+
 	// 填充工作池
 	for i := 0; i < parallelWorkers; i++ {
 		workerPool <- struct{}{}
@@ -211,7 +211,7 @@ func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) 
 	resourceMonitor := &ResourceMonitor{
 		maxMemory:     1024 * 1024 * 1024 * 2, // 2GB内存限制
 		maxGoroutines: int64(parallelWorkers * 2),
-		maxCPU:       80.0, // 80% CPU使用率限制
+		maxCPU:        80.0, // 80% CPU使用率限制
 		checkInterval: time.Second,
 		lastCheck:     time.Now(),
 	}
@@ -269,13 +269,13 @@ func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) 
 		cancel:          cancel,
 		isShutdown:      0,
 	}
-	
+
 	// 启动异步处理工作线程
 	vo.startAsyncWorkers()
-	
+
 	// 启动稳定性监控
 	vo.startStabilityMonitors()
-	
+
 	return vo
 }
 
@@ -305,7 +305,7 @@ func (vo *VideoOptimization) asyncWorker() {
 			if atomic.LoadInt64(&vo.isShutdown) == 1 {
 				return
 			}
-			
+
 			// 检查熔断器状态
 			if !vo.circuitBreakerAllow() {
 				vo.processDone <- &ProcessResult{
@@ -315,7 +315,7 @@ func (vo *VideoOptimization) asyncWorker() {
 				}
 				continue
 			}
-			
+
 			// 限流检查
 			if !vo.rateLimiterAllow() {
 				vo.processDone <- &ProcessResult{
@@ -325,7 +325,7 @@ func (vo *VideoOptimization) asyncWorker() {
 				}
 				continue
 			}
-			
+
 			// 资源检查
 			if !vo.resourceCheck() {
 				vo.processDone <- &ProcessResult{
@@ -335,32 +335,32 @@ func (vo *VideoOptimization) asyncWorker() {
 				}
 				continue
 			}
-			
+
 			<-vo.workerPool // 获取工作许可
-			
+
 			// 记录开始时间
 			startTime := time.Now()
-			
+
 			// 执行预处理
 			data, err := vo.extremePreprocessImage(task.img, task.width, task.height)
-			
+
 			// 记录性能指标
 			latency := time.Since(startTime)
 			vo.updateMetrics(latency, err == nil)
-			
+
 			// 更新熔断器状态
 			vo.circuitBreakerRecord(err == nil)
-			
+
 			// 创建结果
 			result := &ProcessResult{
 				data: data,
 				err:  err,
 				id:   task.id,
 			}
-			
+
 			// 先释放工作许可，避免死锁
 			vo.workerPool <- struct{}{}
-			
+
 			// 非阻塞发送结果，避免死锁
 			select {
 			case vo.processDone <- result:
@@ -369,7 +369,7 @@ func (vo *VideoOptimization) asyncWorker() {
 				// 结果通道满时丢弃结果，避免死锁
 				// 在实际应用中可以考虑记录日志或其他处理方式
 			}
-			
+
 		case <-vo.ctx.Done():
 			// 上下文取消，退出工作线程
 			return
@@ -381,7 +381,7 @@ func (vo *VideoOptimization) asyncWorker() {
 func (vo *VideoOptimization) circuitBreakerAllow() bool {
 	vo.circuitBreaker.mu.RLock()
 	defer vo.circuitBreaker.mu.RUnlock()
-	
+
 	switch vo.circuitBreaker.state {
 	case Closed:
 		return true
@@ -397,7 +397,7 @@ func (vo *VideoOptimization) circuitBreakerAllow() bool {
 func (vo *VideoOptimization) circuitBreakerRecord(success bool) {
 	vo.circuitBreaker.mu.Lock()
 	defer vo.circuitBreaker.mu.Unlock()
-	
+
 	if success {
 		if vo.circuitBreaker.state == HalfOpen {
 			vo.circuitBreaker.state = Closed
@@ -406,7 +406,7 @@ func (vo *VideoOptimization) circuitBreakerRecord(success bool) {
 	} else {
 		vo.circuitBreaker.failureCount++
 		vo.circuitBreaker.lastFailTime = time.Now()
-		
+
 		if vo.circuitBreaker.failureCount >= vo.circuitBreaker.maxFailures {
 			vo.circuitBreaker.state = Open
 			vo.circuitBreaker.nextRetryTime = time.Now().Add(vo.circuitBreaker.retryTimeout)
@@ -418,23 +418,23 @@ func (vo *VideoOptimization) circuitBreakerRecord(success bool) {
 func (vo *VideoOptimization) rateLimiterAllow() bool {
 	vo.rateLimiter.mu.Lock()
 	defer vo.rateLimiter.mu.Unlock()
-	
+
 	now := time.Now()
 	elapsed := now.Sub(vo.rateLimiter.lastRefill)
-	
+
 	// 补充令牌
 	if elapsed > 0 {
 		tokensToAdd := int64(elapsed.Seconds()) * vo.rateLimiter.refillRate
 		vo.rateLimiter.tokens = min(vo.rateLimiter.maxTokens, vo.rateLimiter.tokens+tokensToAdd)
 		vo.rateLimiter.lastRefill = now
 	}
-	
+
 	// 检查是否有可用令牌
 	if vo.rateLimiter.tokens > 0 {
 		vo.rateLimiter.tokens--
 		return true
 	}
-	
+
 	return false
 }
 
@@ -442,19 +442,19 @@ func (vo *VideoOptimization) rateLimiterAllow() bool {
 func (vo *VideoOptimization) resourceCheck() bool {
 	vo.resourceMonitor.mu.RLock()
 	defer vo.resourceMonitor.mu.RUnlock()
-	
+
 	// 检查内存使用
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	if int64(m.Alloc) > vo.resourceMonitor.maxMemory {
 		return false
 	}
-	
+
 	// 检查goroutine数量
 	if int64(runtime.NumGoroutine()) > vo.resourceMonitor.maxGoroutines {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -462,14 +462,14 @@ func (vo *VideoOptimization) resourceCheck() bool {
 func (vo *VideoOptimization) updateMetrics(latency time.Duration, success bool) {
 	vo.metrics.mu.Lock()
 	defer vo.metrics.mu.Unlock()
-	
+
 	vo.metrics.totalRequests++
 	if success {
 		vo.metrics.successRequests++
 	} else {
 		vo.metrics.failedRequests++
 	}
-	
+
 	// 更新延迟统计
 	if latency > vo.metrics.maxLatency {
 		vo.metrics.maxLatency = latency
@@ -477,10 +477,10 @@ func (vo *VideoOptimization) updateMetrics(latency time.Duration, success bool) 
 	if latency < vo.metrics.minLatency {
 		vo.metrics.minLatency = latency
 	}
-	
+
 	// 计算平均延迟
 	vo.metrics.avgLatency = (vo.metrics.avgLatency*time.Duration(vo.metrics.totalRequests-1) + latency) / time.Duration(vo.metrics.totalRequests)
-	
+
 	vo.metrics.lastUpdate = time.Now()
 }
 
@@ -488,7 +488,7 @@ func (vo *VideoOptimization) updateMetrics(latency time.Duration, success bool) 
 func (vo *VideoOptimization) resourceMonitorLoop() {
 	ticker := time.NewTicker(vo.resourceMonitor.checkInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -502,7 +502,7 @@ func (vo *VideoOptimization) resourceMonitorLoop() {
 func (vo *VideoOptimization) healthCheckLoop() {
 	ticker := time.NewTicker(vo.healthChecker.checkInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -516,7 +516,7 @@ func (vo *VideoOptimization) healthCheckLoop() {
 func (vo *VideoOptimization) metricsUpdateLoop() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -530,7 +530,7 @@ func (vo *VideoOptimization) metricsUpdateLoop() {
 func (vo *VideoOptimization) updateResourceMetrics() {
 	vo.resourceMonitor.mu.Lock()
 	defer vo.resourceMonitor.mu.Unlock()
-	
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	vo.resourceMonitor.memoryUsage = int64(m.Alloc)
@@ -541,25 +541,25 @@ func (vo *VideoOptimization) updateResourceMetrics() {
 func (vo *VideoOptimization) performHealthCheck() {
 	vo.healthChecker.mu.Lock()
 	defer vo.healthChecker.mu.Unlock()
-	
+
 	// 检查各种健康指标
 	healthy := true
-	
+
 	// 检查熔断器状态
 	if vo.circuitBreaker.state == Open {
 		healthy = false
 	}
-	
+
 	// 检查资源使用
 	if !vo.resourceCheck() {
 		healthy = false
 	}
-	
+
 	// 检查队列状态
 	if len(vo.asyncQueue) > cap(vo.asyncQueue)*8/10 { // 队列使用超过80%
 		healthy = false
 	}
-	
+
 	if healthy {
 		vo.healthChecker.isHealthy = true
 		vo.healthChecker.failureCount = 0
@@ -569,14 +569,14 @@ func (vo *VideoOptimization) performHealthCheck() {
 			vo.healthChecker.isHealthy = false
 		}
 	}
-	
+
 	vo.healthChecker.lastCheck = time.Now()
 }
 
 func (vo *VideoOptimization) updateThroughput() {
 	vo.metrics.mu.Lock()
 	defer vo.metrics.mu.Unlock()
-	
+
 	now := time.Now()
 	elapsed := now.Sub(vo.metrics.lastUpdate).Seconds()
 	if elapsed > 0 {
@@ -603,7 +603,7 @@ func (vo *VideoOptimization) OptimizedPreprocessImage(img image.Image, inputWidt
 		// CUDA失败时回退到CPU模式
 		fmt.Printf("⚠️ CUDA预处理失败，回退到CPU模式: %v\n", err)
 	}
-	
+
 	// 使用CPU极致性能预处理
 	return vo.extremePreprocessImage(img, inputWidth, inputHeight)
 }
@@ -642,55 +642,58 @@ func (vo *VideoOptimization) extremePreprocessImage(img image.Image, inputWidth,
 	return output, nil
 }
 
-// fastResize 快速图像缩放
+// fastResize 快速图像缩放 - 修复坐标转换问题
 func (vo *VideoOptimization) fastResize(img image.Image, width, height int) image.Image {
-	// 使用最快的缩放算法
-	return imaging.Resize(img, width, height, imaging.NearestNeighbor)
+	// 修复：使用与CPU路径相同的缩放算法，确保坐标转换一致性
+	// 从 imaging.NearestNeighbor 改为 imaging.Lanczos
+	return imaging.Resize(img, width, height, imaging.Lanczos)
 }
 
-// extremeFastResize 极致性能图像缩放
+// extremeFastResize 极致性能图像缩放 - 修复坐标转换问题
 func (vo *VideoOptimization) extremeFastResize(img image.Image, width, height int) image.Image {
 	// 检查是否需要缩放
 	bounds := img.Bounds()
 	if bounds.Dx() == width && bounds.Dy() == height {
 		return img // 无需缩放，直接返回
 	}
-	
-	// 使用直接缩放，与坐标转换逻辑保持一致
-	return imaging.Resize(img, width, height, imaging.NearestNeighbor)
+
+	// 修复：使用与CPU路径相同的缩放算法，确保坐标转换一致性
+	// 从 imaging.NearestNeighbor 改为 imaging.Lanczos
+	return imaging.Resize(img, width, height, imaging.Lanczos)
 }
 
-// resizeWithPadding 保持宽高比的缩放和填充
+// resizeWithPadding 保持宽高比的缩放和填充 - 修复数据类型一致性
 func (vo *VideoOptimization) resizeWithPadding(img image.Image, targetWidth, targetHeight int) image.Image {
 	bounds := img.Bounds()
 	origWidth := bounds.Dx()
 	origHeight := bounds.Dy()
-	
+
+	// 修复：使用与yolo.go中相同的数据类型，确保坐标转换一致性
 	// 计算缩放比例，保持宽高比
-	scaleX := float64(targetWidth) / float64(origWidth)
-	scaleY := float64(targetHeight) / float64(origHeight)
+	scaleX := float32(targetWidth) / float32(origWidth)
+	scaleY := float32(targetHeight) / float32(origHeight)
 	scale := scaleX
 	if scaleY < scaleX {
 		scale = scaleY
 	}
-	
+
 	// 计算缩放后的尺寸
-	newWidth := int(float64(origWidth) * scale)
-	newHeight := int(float64(origHeight) * scale)
-	
-	// 缩放图像（使用最快的算法）
-	resized := imaging.Resize(img, newWidth, newHeight, imaging.NearestNeighbor)
-	
+	newWidth := int(float32(origWidth) * scale)
+	newHeight := int(float32(origHeight) * scale)
+
+	// 缩放图像（修复：使用与CPU路径相同的缩放算法）
+	resized := imaging.Resize(img, newWidth, newHeight, imaging.Lanczos)
+
 	// 创建目标尺寸的黑色背景
 	result := imaging.New(targetWidth, targetHeight, color.NRGBA{0, 0, 0, 255})
-	
+
 	// 计算居中位置
 	offsetX := (targetWidth - newWidth) / 2
 	offsetY := (targetHeight - newHeight) / 2
-	
+
 	// 将缩放后的图像粘贴到中心
 	result = imaging.Paste(result, resized, image.Pt(offsetX, offsetY))
-	
+
 	return result
 }
 
@@ -709,9 +712,9 @@ func (vo *VideoOptimization) fastNormalize(img image.Image, buf []float32) []flo
 		for x := 0; x < width; x++ {
 			r, g, b, _ := img.At(x, y).RGBA()
 			// 归一化到 [0, 1] 范围
-			buf[y*width+x] = float32(r>>8) / 255.0                    // R 通道
-			buf[height*width+y*width+x] = float32(g>>8) / 255.0       // G 通道
-			buf[2*height*width+y*width+x] = float32(b>>8) / 255.0     // B 通道
+			buf[y*width+x] = float32(r>>8) / 255.0                // R 通道
+			buf[height*width+y*width+x] = float32(g>>8) / 255.0   // G 通道
+			buf[2*height*width+y*width+x] = float32(b>>8) / 255.0 // B 通道
 		}
 	}
 	return buf[:requiredSize]
@@ -733,10 +736,10 @@ func (vo *VideoOptimization) extremeFastNormalize(img image.Image, buf []float32
 	if numWorkers > height {
 		numWorkers = height
 	}
-	
+
 	rowsPerWorker := height / numWorkers
 	var wg sync.WaitGroup
-	
+
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func(startRow, endRow int) {
@@ -745,14 +748,14 @@ func (vo *VideoOptimization) extremeFastNormalize(img image.Image, buf []float32
 				for x := 0; x < width; x++ {
 					r, g, b, _ := img.At(x, y).RGBA()
 					// 归一化到 [0, 1]
-					buf[y*width+x] = float32(r>>8) / 255.0                    // R 通道
-					buf[height*width+y*width+x] = float32(g>>8) / 255.0       // G 通道
-					buf[2*height*width+y*width+x] = float32(b>>8) / 255.0     // B 通道
+					buf[y*width+x] = float32(r>>8) / 255.0                // R 通道
+					buf[height*width+y*width+x] = float32(g>>8) / 255.0   // G 通道
+					buf[2*height*width+y*width+x] = float32(b>>8) / 255.0 // B 通道
 				}
 			}
 		}(i*rowsPerWorker, (i+1)*rowsPerWorker)
 	}
-	
+
 	// 处理剩余行
 	if height%numWorkers != 0 {
 		wg.Add(1)
@@ -768,7 +771,7 @@ func (vo *VideoOptimization) extremeFastNormalize(img image.Image, buf []float32
 			}
 		}()
 	}
-	
+
 	wg.Wait()
 	return buf[:requiredSize]
 }
@@ -792,9 +795,9 @@ func (vo *VideoOptimization) fastNormalizeRGBA(rgba *image.RGBA, buf []float32) 
 		for x := 0; x < width; x++ {
 			i := y*stride + x*4
 			// 归一化到 [0, 1]
-			buf[y*width+x] = float32(pix[i]) / 255.0                    // R通道
-			buf[height*width+y*width+x] = float32(pix[i+1]) / 255.0     // G通道
-			buf[2*height*width+y*width+x] = float32(pix[i+2]) / 255.0   // B通道
+			buf[y*width+x] = float32(pix[i]) / 255.0                  // R通道
+			buf[height*width+y*width+x] = float32(pix[i+1]) / 255.0   // G通道
+			buf[2*height*width+y*width+x] = float32(pix[i+2]) / 255.0 // B通道
 		}
 	}
 
@@ -821,10 +824,10 @@ func (vo *VideoOptimization) extremeFastNormalizeRGBA(rgba *image.RGBA, buf []fl
 	if numWorkers > height {
 		numWorkers = height
 	}
-	
+
 	rowsPerWorker := height / numWorkers
 	var wg sync.WaitGroup
-	
+
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func(startRow, endRow int) {
@@ -842,7 +845,7 @@ func (vo *VideoOptimization) extremeFastNormalizeRGBA(rgba *image.RGBA, buf []fl
 			}
 		}(i*rowsPerWorker, (i+1)*rowsPerWorker)
 	}
-	
+
 	// 处理剩余行
 	if height%numWorkers != 0 {
 		wg.Add(1)
@@ -859,7 +862,7 @@ func (vo *VideoOptimization) extremeFastNormalizeRGBA(rgba *image.RGBA, buf []fl
 			}
 		}()
 	}
-	
+
 	wg.Wait()
 	return buf[:requiredSize]
 }
@@ -1085,7 +1088,7 @@ func (vo *VideoOptimization) GetParallelWorkers() int {
 // GetStabilityStatus 获取稳定性状态信息 - 疯狂调用监控
 func (vo *VideoOptimization) GetStabilityStatus() map[string]interface{} {
 	status := make(map[string]interface{})
-	
+
 	// 熔断器状态
 	vo.circuitBreaker.mu.RLock()
 	status["circuit_breaker"] = map[string]interface{}{
@@ -1094,7 +1097,7 @@ func (vo *VideoOptimization) GetStabilityStatus() map[string]interface{} {
 		"last_fail":     vo.circuitBreaker.lastFailTime,
 	}
 	vo.circuitBreaker.mu.RUnlock()
-	
+
 	// 限流器状态
 	vo.rateLimiter.mu.Lock()
 	status["rate_limiter"] = map[string]interface{}{
@@ -1103,27 +1106,27 @@ func (vo *VideoOptimization) GetStabilityStatus() map[string]interface{} {
 		"refill_rate": vo.rateLimiter.refillRate,
 	}
 	vo.rateLimiter.mu.Unlock()
-	
+
 	// 资源监控状态
 	vo.resourceMonitor.mu.RLock()
 	status["resource_monitor"] = map[string]interface{}{
-		"memory_usage":     vo.resourceMonitor.memoryUsage,
-		"goroutine_count":  vo.resourceMonitor.goroutineCount,
-		"cpu_usage":        vo.resourceMonitor.cpuUsage,
-		"max_memory":       vo.resourceMonitor.maxMemory,
-		"max_goroutines":   vo.resourceMonitor.maxGoroutines,
+		"memory_usage":    vo.resourceMonitor.memoryUsage,
+		"goroutine_count": vo.resourceMonitor.goroutineCount,
+		"cpu_usage":       vo.resourceMonitor.cpuUsage,
+		"max_memory":      vo.resourceMonitor.maxMemory,
+		"max_goroutines":  vo.resourceMonitor.maxGoroutines,
 	}
 	vo.resourceMonitor.mu.RUnlock()
-	
+
 	// 健康检查状态
 	vo.healthChecker.mu.RLock()
 	status["health_checker"] = map[string]interface{}{
-		"is_healthy":     vo.healthChecker.isHealthy,
-		"failure_count":  vo.healthChecker.failureCount,
-		"last_check":     vo.healthChecker.lastCheck,
+		"is_healthy":    vo.healthChecker.isHealthy,
+		"failure_count": vo.healthChecker.failureCount,
+		"last_check":    vo.healthChecker.lastCheck,
 	}
 	vo.healthChecker.mu.RUnlock()
-	
+
 	// 性能指标
 	vo.metrics.mu.RLock()
 	status["performance_metrics"] = map[string]interface{}{
@@ -1136,7 +1139,7 @@ func (vo *VideoOptimization) GetStabilityStatus() map[string]interface{} {
 		"throughput":       vo.metrics.throughput,
 	}
 	vo.metrics.mu.RUnlock()
-	
+
 	return status
 }
 
@@ -1147,7 +1150,7 @@ func (vo *VideoOptimization) ResetStabilityMetrics() {
 	vo.circuitBreaker.state = Closed
 	vo.circuitBreaker.failureCount = 0
 	vo.circuitBreaker.mu.Unlock()
-	
+
 	// 重置性能指标
 	vo.metrics.mu.Lock()
 	vo.metrics.totalRequests = 0
@@ -1159,7 +1162,7 @@ func (vo *VideoOptimization) ResetStabilityMetrics() {
 	vo.metrics.throughput = 0
 	vo.metrics.lastUpdate = time.Now()
 	vo.metrics.mu.Unlock()
-	
+
 	// 重置健康检查
 	vo.healthChecker.mu.Lock()
 	vo.healthChecker.isHealthy = true
@@ -1172,7 +1175,7 @@ func (vo *VideoOptimization) ResetStabilityMetrics() {
 func (vo *VideoOptimization) AdjustPerformanceSettings(maxMemoryMB int64, maxGoroutines int64, maxCPU float64) {
 	vo.resourceMonitor.mu.Lock()
 	defer vo.resourceMonitor.mu.Unlock()
-	
+
 	vo.resourceMonitor.maxMemory = maxMemoryMB * 1024 * 1024
 	vo.resourceMonitor.maxGoroutines = maxGoroutines
 	vo.resourceMonitor.maxCPU = maxCPU
@@ -1182,7 +1185,7 @@ func (vo *VideoOptimization) AdjustPerformanceSettings(maxMemoryMB int64, maxGor
 func (vo *VideoOptimization) SetRateLimitSettings(maxTokens, refillRate int64) {
 	vo.rateLimiter.mu.Lock()
 	defer vo.rateLimiter.mu.Unlock()
-	
+
 	vo.rateLimiter.maxTokens = maxTokens
 	vo.rateLimiter.refillRate = refillRate
 	vo.rateLimiter.tokens = maxTokens // 立即生效
@@ -1192,7 +1195,7 @@ func (vo *VideoOptimization) SetRateLimitSettings(maxTokens, refillRate int64) {
 func (vo *VideoOptimization) SetCircuitBreakerSettings(maxFailures int64, timeout, retryTimeout time.Duration) {
 	vo.circuitBreaker.mu.Lock()
 	defer vo.circuitBreaker.mu.Unlock()
-	
+
 	vo.circuitBreaker.maxFailures = maxFailures
 	vo.circuitBreaker.timeout = timeout
 	vo.circuitBreaker.retryTimeout = retryTimeout
@@ -1202,30 +1205,30 @@ func (vo *VideoOptimization) SetCircuitBreakerSettings(maxFailures int64, timeou
 func (vo *VideoOptimization) Close() {
 	// 设置关闭标志
 	atomic.StoreInt64(&vo.isShutdown, 1)
-	
+
 	// 取消上下文，通知所有监控循环退出
 	vo.cancel()
-	
+
 	// 关闭CUDA加速器
 	if vo.cudaAccelerator != nil {
 		fmt.Println("🔒 正在关闭CUDA加速器...")
 		vo.cudaAccelerator.Close()
 		vo.cudaAccelerator = nil
 	}
-	
+
 	// 等待一小段时间让工作线程优雅退出
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// 关闭异步队列，这会导致所有asyncWorker退出
 	if vo.asyncQueue != nil {
 		close(vo.asyncQueue)
 	}
-	
+
 	// 等待所有工作线程完成
 	for i := 0; i < vo.parallelWorkers; i++ {
 		<-vo.workerPool
 	}
-	
+
 	// 清空结果通道
 	if vo.processDone != nil {
 		for {
@@ -1239,7 +1242,7 @@ func (vo *VideoOptimization) Close() {
 			}
 		}
 	}
-	
+
 	fmt.Println("🔒 VideoOptimization 已安全关闭（包含CUDA资源）")
 }
 
@@ -1249,34 +1252,34 @@ func (vo *VideoOptimization) IsHealthy() bool {
 	if atomic.LoadInt64(&vo.isShutdown) == 1 {
 		return false
 	}
-	
+
 	if vo.asyncQueue == nil || vo.processDone == nil || vo.workerPool == nil {
 		return false
 	}
-	
+
 	// 检查健康检查器状态
 	vo.healthChecker.mu.RLock()
 	isHealthy := vo.healthChecker.isHealthy
 	vo.healthChecker.mu.RUnlock()
-	
+
 	if !isHealthy {
 		return false
 	}
-	
+
 	// 检查熔断器状态
 	vo.circuitBreaker.mu.RLock()
 	circuitOpen := vo.circuitBreaker.state == Open
 	vo.circuitBreaker.mu.RUnlock()
-	
+
 	if circuitOpen {
 		return false
 	}
-	
+
 	// 检查队列状态
 	if len(vo.asyncQueue) > cap(vo.asyncQueue)*9/10 { // 队列使用超过90%
 		return false
 	}
-	
+
 	// 检查资源使用
 	return vo.resourceCheck()
 }
