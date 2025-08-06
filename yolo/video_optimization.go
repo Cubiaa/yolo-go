@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -655,8 +656,42 @@ func (vo *VideoOptimization) extremeFastResize(img image.Image, width, height in
 		return img // 无需缩放，直接返回
 	}
 	
-	// 使用最快的缩放算法 - NearestNeighbor
-	return imaging.Resize(img, width, height, imaging.NearestNeighbor)
+	// 使用保持宽高比的缩放方法
+	return vo.resizeWithPadding(img, width, height)
+}
+
+// resizeWithPadding 保持宽高比的缩放和填充
+func (vo *VideoOptimization) resizeWithPadding(img image.Image, targetWidth, targetHeight int) image.Image {
+	bounds := img.Bounds()
+	origWidth := bounds.Dx()
+	origHeight := bounds.Dy()
+	
+	// 计算缩放比例，保持宽高比
+	scaleX := float64(targetWidth) / float64(origWidth)
+	scaleY := float64(targetHeight) / float64(origHeight)
+	scale := scaleX
+	if scaleY < scaleX {
+		scale = scaleY
+	}
+	
+	// 计算缩放后的尺寸
+	newWidth := int(float64(origWidth) * scale)
+	newHeight := int(float64(origHeight) * scale)
+	
+	// 缩放图像（使用最快的算法）
+	resized := imaging.Resize(img, newWidth, newHeight, imaging.NearestNeighbor)
+	
+	// 创建目标尺寸的黑色背景
+	result := imaging.New(targetWidth, targetHeight, color.NRGBA{0, 0, 0, 255})
+	
+	// 计算居中位置
+	offsetX := (targetWidth - newWidth) / 2
+	offsetY := (targetHeight - newHeight) / 2
+	
+	// 将缩放后的图像粘贴到中心
+	result = imaging.Paste(result, resized, image.Pt(offsetX, offsetY))
+	
+	return result
 }
 
 // fastNormalize 快速归一化（通用版本）

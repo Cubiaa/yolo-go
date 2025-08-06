@@ -687,14 +687,14 @@ func (y *YOLO) preprocessImage(imagePath string) ([]float32, error) {
 		return nil, fmt.Errorf("无法解码图像: %v", err)
 	}
 
-	// 根据配置调整大小
+	// 根据配置调整大小 - 保持宽高比
 	var resized image.Image
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
-		// 使用自定义的宽度和高度
-		resized = imaging.Resize(img, y.config.InputWidth, y.config.InputHeight, imaging.Lanczos)
+		// 使用自定义的宽度和高度 - 保持宽高比并填充
+		resized = y.resizeWithPadding(img, y.config.InputWidth, y.config.InputHeight)
 	} else {
-		// 使用正方形输入尺寸
-		resized = imaging.Resize(img, y.config.InputSize, y.config.InputSize, imaging.Lanczos)
+		// 使用正方形输入尺寸 - 保持宽高比并填充
+		resized = y.resizeWithPadding(img, y.config.InputSize, y.config.InputSize)
 	}
 
 	// 转换为RGB并归一化
@@ -1094,6 +1094,47 @@ func max(a, b float32) float32 {
 	return b
 }
 
+// resizeWithPadding 保持宽高比缩放图像并填充到目标尺寸
+func (y *YOLO) resizeWithPadding(img image.Image, targetWidth, targetHeight int) image.Image {
+	bounds := img.Bounds()
+	origWidth := float64(bounds.Dx())
+	origHeight := float64(bounds.Dy())
+
+	// 计算缩放比例，保持宽高比
+	scaleX := float64(targetWidth) / origWidth
+	scaleY := float64(targetHeight) / origHeight
+	scale := scaleX
+	if scaleY < scaleX {
+		scale = scaleY
+	}
+
+	// 计算缩放后的尺寸
+	newWidth := int(origWidth * scale)
+	newHeight := int(origHeight * scale)
+
+	// 缩放图像
+	resized := imaging.Resize(img, newWidth, newHeight, imaging.Lanczos)
+
+	// 创建目标尺寸的黑色背景
+	padded := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
+	// 默认为黑色背景 (0, 0, 0, 255)
+	for y := 0; y < targetHeight; y++ {
+		for x := 0; x < targetWidth; x++ {
+			padded.Set(x, y, color.RGBA{0, 0, 0, 255})
+		}
+	}
+
+	// 计算居中位置
+	offsetX := (targetWidth - newWidth) / 2
+	offsetY := (targetHeight - newHeight) / 2
+
+	// 将缩放后的图像粘贴到中心位置
+	draw.Draw(padded, image.Rect(offsetX, offsetY, offsetX+newWidth, offsetY+newHeight), 
+		resized, image.Point{0, 0}, draw.Src)
+
+	return padded
+}
+
 // minFloat32函数已在video_simple.go中定义
 
 // parseColor 解析颜色字符串
@@ -1406,14 +1447,14 @@ func (y *YOLO) detectImage(img image.Image) ([]Detection, error) {
 
 // preprocessImageFromMemory 从内存图像预处理
 func (y *YOLO) preprocessImageFromMemory(img image.Image) ([]float32, error) {
-	// 根据配置调整大小
+	// 根据配置调整大小，保持宽高比
 	var resized image.Image
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
 		// 使用自定义的宽度和高度
-		resized = imaging.Resize(img, y.config.InputWidth, y.config.InputHeight, imaging.Lanczos)
+		resized = y.resizeWithPadding(img, y.config.InputWidth, y.config.InputHeight)
 	} else {
 		// 使用正方形输入尺寸
-		resized = imaging.Resize(img, y.config.InputSize, y.config.InputSize, imaging.Lanczos)
+		resized = y.resizeWithPadding(img, y.config.InputSize, y.config.InputSize)
 	}
 
 	// 转换为RGB并归一化
