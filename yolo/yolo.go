@@ -687,14 +687,14 @@ func (y *YOLO) preprocessImage(imagePath string) ([]float32, error) {
 		return nil, fmt.Errorf("无法解码图像: %v", err)
 	}
 
-	// 根据配置调整大小 - 保持宽高比
+	// 根据配置调整大小 - 直接缩放
 	var resized image.Image
 	if y.config.InputWidth > 0 && y.config.InputHeight > 0 {
-		// 使用自定义的宽度和高度 - 保持宽高比并填充
-		resized = y.resizeWithPadding(img, y.config.InputWidth, y.config.InputHeight)
+		// 使用自定义的宽度和高度 - 直接缩放
+		resized = imaging.Resize(img, y.config.InputWidth, y.config.InputHeight, imaging.Lanczos)
 	} else {
-		// 使用正方形输入尺寸 - 保持宽高比并填充
-		resized = y.resizeWithPadding(img, y.config.InputSize, y.config.InputSize)
+		// 使用正方形输入尺寸 - 直接缩放
+		resized = imaging.Resize(img, y.config.InputSize, y.config.InputSize, imaging.Lanczos)
 	}
 
 	// 转换为RGB并归一化
