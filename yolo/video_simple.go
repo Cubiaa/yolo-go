@@ -13,6 +13,21 @@ import (
 	"time"
 )
 
+// 辅助函数
+func maxFloat32(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minFloat32(a, b float32) float32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // SimpleVideoProcessor 简单视频处理器（使用标准库）
 type SimpleVideoProcessor struct {
 	detector *YOLO
@@ -185,10 +200,10 @@ func (svp *SimpleVideoProcessor) drawBBoxOnImage(img draw.Image, bbox [4]float32
 	y2 := int(bbox[3] * float32(height))
 
 	// 确保坐标在图像范围内
-	x1 = int(max(0, min(float32(x1), float32(width-1))))
-	y1 = int(max(0, min(float32(y1), float32(height-1))))
-	x2 = int(max(0, min(float32(x2), float32(width-1))))
-	y2 = int(max(0, min(float32(y2), float32(height-1))))
+	x1 = int(maxFloat32(0, minFloat32(float32(x1), float32(width-1))))
+	y1 = int(maxFloat32(0, minFloat32(float32(y1), float32(height-1))))
+	x2 = int(maxFloat32(0, minFloat32(float32(x2), float32(width-1))))
+	y2 = int(maxFloat32(0, minFloat32(float32(y2), float32(width-1))))
 
 	// 获取线条宽度
 	lineWidth := 2

@@ -368,10 +368,11 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 		modelOutputShape: modelOutputShape,
 	}
 
-	// 初始化GPU极致优化模块
-	yolo.optimization = NewVideoOptimization(yoloConfig.UseGPU)
-	fmt.Printf("🚀 GPU极致优化模块已初始化 (GPU: %v, 批处理大小: %d, 并行工作线程: %d)\n", 
+	// 初始化GPU极致优化模块，支持CUDA加速
+	yolo.optimization = NewVideoOptimizationWithCUDA(yoloConfig.UseGPU, yoloConfig.UseCUDA, yoloConfig.CUDADeviceID)
+	fmt.Printf("🚀 GPU极致优化模块已初始化 (GPU: %v, CUDA: %v, 批处理大小: %d, 并行工作线程: %d)\n", 
 		yolo.optimization.IsGPUEnabled(), 
+		yolo.optimization.IsCUDAEnabled(),
 		yolo.optimization.GetBatchSize(), 
 		yolo.optimization.GetParallelWorkers())
 
@@ -794,8 +795,8 @@ func (y *YOLO) iou(box1, box2 [4]float32) float32 {
 
 	interXMin := max(x1Min, x2Min)
 	interYMin := max(y1Min, y2Min)
-	interXMax := min(x1Max, x2Max)
-	interYMax := min(y1Max, y2Max)
+	interXMax := minFloat32(x1Max, x2Max)
+	interYMax := minFloat32(y1Max, y2Max)
 
 	interArea := max(0, interXMax-interXMin) * max(0, interYMax-interYMin)
 	area1 := (x1Max - x1Min) * (y1Max - y1Min)
@@ -840,10 +841,10 @@ func (y *YOLO) drawBBox(img draw.Image, bbox [4]float32, lineColor color.Color) 
 	bounds := img.Bounds()
 	width, height := bounds.Max.X, bounds.Max.Y
 
-	x1 := int(max(0, min(float32(width-1), bbox[0])))
-	y1 := int(max(0, min(float32(height-1), bbox[1])))
-	x2 := int(max(0, min(float32(width-1), bbox[2])))
-	y2 := int(max(0, min(float32(height-1), bbox[3])))
+	x1 := int(max(0, minFloat32(float32(width-1), bbox[0])))
+	y1 := int(max(0, minFloat32(float32(height-1), bbox[1])))
+	x2 := int(max(0, minFloat32(float32(width-1), bbox[2])))
+	y2 := int(max(0, minFloat32(float32(width-1), bbox[3])))
 
 	// 获取线条宽度
 	lineWidth := 1
@@ -907,8 +908,8 @@ func (y *YOLO) drawDetections(imagePath, outputPath string, detections []Detecti
 		// 检测结果坐标已经是原始图像坐标，无需再次缩放
 		x1 := max(0, detection.Box[0])
 		y1 := max(0, detection.Box[1])
-		x2 := min(float32(origW), detection.Box[2])
-		y2 := min(float32(origH), detection.Box[3])
+		x2 := minFloat32(float32(origW), detection.Box[2])
+		y2 := minFloat32(float32(origH), detection.Box[3])
 
 		// 检查是否应该画框和标签
 		drawBoxes := true
@@ -976,8 +977,8 @@ func (y *YOLO) drawDetectionsOnImage(img image.Image, detections []Detection) im
 		// 检测结果坐标已经是原始图像坐标，无需再次缩放
 		x1 := max(0, detection.Box[0])
 		y1 := max(0, detection.Box[1])
-		x2 := min(float32(origW), detection.Box[2])
-		y2 := min(float32(origH), detection.Box[3])
+		x2 := minFloat32(float32(origW), detection.Box[2])
+		y2 := minFloat32(float32(origH), detection.Box[3])
 
 		// 检查是否应该画框和标签
 		drawBoxes := true
@@ -1093,12 +1094,7 @@ func max(a, b float32) float32 {
 	return b
 }
 
-func min(a, b float32) float32 {
-	if a < b {
-		return a
-	}
-	return b
-}
+// minFloat32函数已在video_simple.go中定义
 
 // parseColor 解析颜色字符串
 func (y *YOLO) parseColor(colorStr string) *color.RGBA {

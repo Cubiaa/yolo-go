@@ -1,15 +1,18 @@
 package yolo
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"runtime"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/disintegration/imaging"
 )
 
-// VideoOptimization GPU优化相关的结构体和方法
+// VideoOptimization GPU优化相关的结构体和方法 - 疯狂调用稳定版 + CUDA加速
 type VideoOptimization struct {
 	batchSize       int
 	preprocessBuf   [][]float32
@@ -24,6 +27,21 @@ type VideoOptimization struct {
 	memoryBuffer    [][]float32
 	asyncQueue      chan *ProcessTask
 	processDone     chan *ProcessResult
+	
+	// CUDA加速模块
+	cudaAccelerator *CUDAAccelerator
+	enableCUDA      bool
+	cudaDeviceID    int
+	
+	// 疯狂调用稳定性保障字段
+	circuitBreaker  *CircuitBreaker
+	rateLimiter    *RateLimiter
+	resourceMonitor *ResourceMonitor
+	healthChecker   *HealthChecker
+	metrics         *PerformanceMetrics
+	ctx             context.Context
+	cancel          context.CancelFunc
+	isShutdown      int64 // atomic
 }
 
 // ProcessTask 异步处理任务
@@ -41,8 +59,78 @@ type ProcessResult struct {
 	id   int
 }
 
-// NewVideoOptimization 创建视频优化实例 - 极致性能版本
+// CircuitBreaker 熔断器 - 防止系统过载
+type CircuitBreaker struct {
+	mu            sync.RWMutex
+	state         CircuitState
+	failureCount  int64
+	lastFailTime  time.Time
+	nextRetryTime time.Time
+	maxFailures   int64
+	timeout       time.Duration
+	retryTimeout  time.Duration
+}
+
+type CircuitState int
+
+const (
+	Closed CircuitState = iota
+	Open
+	HalfOpen
+)
+
+// RateLimiter 限流器 - 控制调用频率
+type RateLimiter struct {
+	mu       sync.Mutex
+	tokens   int64
+	maxTokens int64
+	refillRate int64
+	lastRefill time.Time
+}
+
+// ResourceMonitor 资源监控器 - 监控系统资源
+type ResourceMonitor struct {
+	mu              sync.RWMutex
+	memoryUsage     int64
+	goroutineCount  int64
+	cpuUsage        float64
+	maxMemory       int64
+	maxGoroutines   int64
+	maxCPU          float64
+	lastCheck       time.Time
+	checkInterval   time.Duration
+}
+
+// HealthChecker 健康检查器 - 检查系统健康状态
+type HealthChecker struct {
+	mu            sync.RWMutex
+	isHealthy     bool
+	lastCheck     time.Time
+	checkInterval time.Duration
+	failureCount  int64
+	maxFailures   int64
+}
+
+// PerformanceMetrics 性能指标 - 记录性能数据
+type PerformanceMetrics struct {
+	mu              sync.RWMutex
+	totalRequests   int64
+	successRequests int64
+	failedRequests  int64
+	avgLatency      time.Duration
+	maxLatency      time.Duration
+	minLatency      time.Duration
+	throughput      float64
+	lastUpdate      time.Time
+}
+
+// NewVideoOptimization 创建视频优化实例 - 疯狂调用稳定版本 + CUDA加速
 func NewVideoOptimization(enableGPU bool) *VideoOptimization {
+	return NewVideoOptimizationWithCUDA(enableGPU, false, 0)
+}
+
+// NewVideoOptimizationWithCUDA 创建带CUDA加速的视频优化实例
+func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) *VideoOptimization {
 	// 极致性能配置 - 不计成本
 	cpuCores := runtime.NumCPU()
 	
@@ -56,6 +144,13 @@ func NewVideoOptimization(enableGPU bool) *VideoOptimization {
 		batchSize = cpuCores * 8
 		maxBatchSize = cpuCores * 32 // GPU疯狂模式
 		parallelWorkers = cpuCores * 16
+	}
+	
+	// CUDA模式下进一步优化
+	if enableCUDA {
+		batchSize = cpuCores * 16 // CUDA疯狂批处理
+		maxBatchSize = cpuCores * 64 // CUDA极致模式
+		parallelWorkers = cpuCores * 32 // CUDA并行工作线程
 	}
 
 	// 预分配大量内存缓冲区
@@ -94,6 +189,58 @@ func NewVideoOptimization(enableGPU bool) *VideoOptimization {
 		workerPool <- struct{}{}
 	}
 
+	// 创建上下文用于优雅关闭
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// 初始化稳定性保障组件
+	circuitBreaker := &CircuitBreaker{
+		maxFailures:  10,
+		timeout:      30 * time.Second,
+		retryTimeout: 5 * time.Second,
+		state:        Closed,
+	}
+
+	rateLimiter := &RateLimiter{
+		maxTokens:  int64(parallelWorkers * 10), // 允许突发流量
+		refillRate: int64(parallelWorkers),      // 每秒补充令牌
+		tokens:     int64(parallelWorkers * 10),
+		lastRefill: time.Now(),
+	}
+
+	resourceMonitor := &ResourceMonitor{
+		maxMemory:     1024 * 1024 * 1024 * 2, // 2GB内存限制
+		maxGoroutines: int64(parallelWorkers * 2),
+		maxCPU:       80.0, // 80% CPU使用率限制
+		checkInterval: time.Second,
+		lastCheck:     time.Now(),
+	}
+
+	healthChecker := &HealthChecker{
+		isHealthy:     true,
+		checkInterval: 5 * time.Second,
+		maxFailures:   5,
+		lastCheck:     time.Now(),
+	}
+
+	metrics := &PerformanceMetrics{
+		minLatency: time.Hour, // 初始化为最大值
+		lastUpdate: time.Now(),
+	}
+
+	// 初始化CUDA加速器（如果启用）
+	var cudaAccelerator *CUDAAccelerator
+	if enableCUDA {
+		var err error
+		cudaAccelerator, err = NewCUDAAccelerator(cudaDeviceID)
+		if err != nil {
+			fmt.Printf("⚠️ CUDA加速器初始化失败，回退到CPU模式: %v\n", err)
+			enableCUDA = false
+			cudaAccelerator = nil
+		} else {
+			fmt.Printf("🚀 CUDA加速器初始化成功，设备ID: %d\n", cudaDeviceID)
+		}
+	}
+
 	vo := &VideoOptimization{
 		batchSize:       batchSize,
 		preprocessBuf:   preprocessBuf,
@@ -107,10 +254,26 @@ func NewVideoOptimization(enableGPU bool) *VideoOptimization {
 		memoryBuffer:    memoryBuffer,
 		asyncQueue:      asyncQueue,
 		processDone:     processDone,
+		// CUDA加速模块
+		cudaAccelerator: cudaAccelerator,
+		enableCUDA:      enableCUDA,
+		cudaDeviceID:    cudaDeviceID,
+		// 稳定性保障组件
+		circuitBreaker:  circuitBreaker,
+		rateLimiter:     rateLimiter,
+		resourceMonitor: resourceMonitor,
+		healthChecker:   healthChecker,
+		metrics:         metrics,
+		ctx:             ctx,
+		cancel:          cancel,
+		isShutdown:      0,
 	}
 	
 	// 启动异步处理工作线程
 	vo.startAsyncWorkers()
+	
+	// 启动稳定性监控
+	vo.startStabilityMonitors()
 	
 	return vo
 }
@@ -122,37 +285,325 @@ func (vo *VideoOptimization) startAsyncWorkers() {
 	}
 }
 
-// asyncWorker 异步工作线程
+// startStabilityMonitors 启动稳定性监控
+func (vo *VideoOptimization) startStabilityMonitors() {
+	// 启动资源监控
+	go vo.resourceMonitorLoop()
+	// 启动健康检查
+	go vo.healthCheckLoop()
+	// 启动性能指标更新
+	go vo.metricsUpdateLoop()
+}
+
+// asyncWorker 异步工作线程 - 带稳定性保障
 func (vo *VideoOptimization) asyncWorker() {
-	for task := range vo.asyncQueue {
-		<-vo.workerPool // 获取工作许可
-		
-		// 执行预处理
-		data, err := vo.extremePreprocessImage(task.img, task.width, task.height)
-		
-		// 创建结果
-		result := &ProcessResult{
-			data: data,
-			err:  err,
-			id:   task.id,
-		}
-		
-		// 先释放工作许可，避免死锁
-		vo.workerPool <- struct{}{}
-		
-		// 非阻塞发送结果，避免死锁
+	for {
 		select {
-		case vo.processDone <- result:
-			// 成功发送结果
-		default:
-			// 结果通道满时丢弃结果，避免死锁
-			// 在实际应用中可以考虑记录日志或其他处理方式
+		case task := <-vo.asyncQueue:
+			// 检查系统是否关闭
+			if atomic.LoadInt64(&vo.isShutdown) == 1 {
+				return
+			}
+			
+			// 检查熔断器状态
+			if !vo.circuitBreakerAllow() {
+				vo.processDone <- &ProcessResult{
+					data: nil,
+					err:  fmt.Errorf("circuit breaker open"),
+					id:   task.id,
+				}
+				continue
+			}
+			
+			// 限流检查
+			if !vo.rateLimiterAllow() {
+				vo.processDone <- &ProcessResult{
+					data: nil,
+					err:  fmt.Errorf("rate limit exceeded"),
+					id:   task.id,
+				}
+				continue
+			}
+			
+			// 资源检查
+			if !vo.resourceCheck() {
+				vo.processDone <- &ProcessResult{
+					data: nil,
+					err:  fmt.Errorf("resource limit exceeded"),
+					id:   task.id,
+				}
+				continue
+			}
+			
+			<-vo.workerPool // 获取工作许可
+			
+			// 记录开始时间
+			startTime := time.Now()
+			
+			// 执行预处理
+			data, err := vo.extremePreprocessImage(task.img, task.width, task.height)
+			
+			// 记录性能指标
+			latency := time.Since(startTime)
+			vo.updateMetrics(latency, err == nil)
+			
+			// 更新熔断器状态
+			vo.circuitBreakerRecord(err == nil)
+			
+			// 创建结果
+			result := &ProcessResult{
+				data: data,
+				err:  err,
+				id:   task.id,
+			}
+			
+			// 先释放工作许可，避免死锁
+			vo.workerPool <- struct{}{}
+			
+			// 非阻塞发送结果，避免死锁
+			select {
+			case vo.processDone <- result:
+				// 成功发送结果
+			default:
+				// 结果通道满时丢弃结果，避免死锁
+				// 在实际应用中可以考虑记录日志或其他处理方式
+			}
+			
+		case <-vo.ctx.Done():
+			// 上下文取消，退出工作线程
+			return
 		}
 	}
 }
 
-// OptimizedPreprocessImage 优化的图像预处理方法 - 极致性能版本
+// 熔断器相关方法
+func (vo *VideoOptimization) circuitBreakerAllow() bool {
+	vo.circuitBreaker.mu.RLock()
+	defer vo.circuitBreaker.mu.RUnlock()
+	
+	switch vo.circuitBreaker.state {
+	case Closed:
+		return true
+	case Open:
+		return time.Now().After(vo.circuitBreaker.nextRetryTime)
+	case HalfOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+func (vo *VideoOptimization) circuitBreakerRecord(success bool) {
+	vo.circuitBreaker.mu.Lock()
+	defer vo.circuitBreaker.mu.Unlock()
+	
+	if success {
+		if vo.circuitBreaker.state == HalfOpen {
+			vo.circuitBreaker.state = Closed
+			vo.circuitBreaker.failureCount = 0
+		}
+	} else {
+		vo.circuitBreaker.failureCount++
+		vo.circuitBreaker.lastFailTime = time.Now()
+		
+		if vo.circuitBreaker.failureCount >= vo.circuitBreaker.maxFailures {
+			vo.circuitBreaker.state = Open
+			vo.circuitBreaker.nextRetryTime = time.Now().Add(vo.circuitBreaker.retryTimeout)
+		}
+	}
+}
+
+// 限流器相关方法
+func (vo *VideoOptimization) rateLimiterAllow() bool {
+	vo.rateLimiter.mu.Lock()
+	defer vo.rateLimiter.mu.Unlock()
+	
+	now := time.Now()
+	elapsed := now.Sub(vo.rateLimiter.lastRefill)
+	
+	// 补充令牌
+	if elapsed > 0 {
+		tokensToAdd := int64(elapsed.Seconds()) * vo.rateLimiter.refillRate
+		vo.rateLimiter.tokens = min(vo.rateLimiter.maxTokens, vo.rateLimiter.tokens+tokensToAdd)
+		vo.rateLimiter.lastRefill = now
+	}
+	
+	// 检查是否有可用令牌
+	if vo.rateLimiter.tokens > 0 {
+		vo.rateLimiter.tokens--
+		return true
+	}
+	
+	return false
+}
+
+// 资源检查方法
+func (vo *VideoOptimization) resourceCheck() bool {
+	vo.resourceMonitor.mu.RLock()
+	defer vo.resourceMonitor.mu.RUnlock()
+	
+	// 检查内存使用
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	if int64(m.Alloc) > vo.resourceMonitor.maxMemory {
+		return false
+	}
+	
+	// 检查goroutine数量
+	if int64(runtime.NumGoroutine()) > vo.resourceMonitor.maxGoroutines {
+		return false
+	}
+	
+	return true
+}
+
+// 性能指标更新方法
+func (vo *VideoOptimization) updateMetrics(latency time.Duration, success bool) {
+	vo.metrics.mu.Lock()
+	defer vo.metrics.mu.Unlock()
+	
+	vo.metrics.totalRequests++
+	if success {
+		vo.metrics.successRequests++
+	} else {
+		vo.metrics.failedRequests++
+	}
+	
+	// 更新延迟统计
+	if latency > vo.metrics.maxLatency {
+		vo.metrics.maxLatency = latency
+	}
+	if latency < vo.metrics.minLatency {
+		vo.metrics.minLatency = latency
+	}
+	
+	// 计算平均延迟
+	vo.metrics.avgLatency = (vo.metrics.avgLatency*time.Duration(vo.metrics.totalRequests-1) + latency) / time.Duration(vo.metrics.totalRequests)
+	
+	vo.metrics.lastUpdate = time.Now()
+}
+
+// 监控循环方法
+func (vo *VideoOptimization) resourceMonitorLoop() {
+	ticker := time.NewTicker(vo.resourceMonitor.checkInterval)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			vo.updateResourceMetrics()
+		case <-vo.ctx.Done():
+			return
+		}
+	}
+}
+
+func (vo *VideoOptimization) healthCheckLoop() {
+	ticker := time.NewTicker(vo.healthChecker.checkInterval)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			vo.performHealthCheck()
+		case <-vo.ctx.Done():
+			return
+		}
+	}
+}
+
+func (vo *VideoOptimization) metricsUpdateLoop() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			vo.updateThroughput()
+		case <-vo.ctx.Done():
+			return
+		}
+	}
+}
+
+func (vo *VideoOptimization) updateResourceMetrics() {
+	vo.resourceMonitor.mu.Lock()
+	defer vo.resourceMonitor.mu.Unlock()
+	
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	vo.resourceMonitor.memoryUsage = int64(m.Alloc)
+	vo.resourceMonitor.goroutineCount = int64(runtime.NumGoroutine())
+	vo.resourceMonitor.lastCheck = time.Now()
+}
+
+func (vo *VideoOptimization) performHealthCheck() {
+	vo.healthChecker.mu.Lock()
+	defer vo.healthChecker.mu.Unlock()
+	
+	// 检查各种健康指标
+	healthy := true
+	
+	// 检查熔断器状态
+	if vo.circuitBreaker.state == Open {
+		healthy = false
+	}
+	
+	// 检查资源使用
+	if !vo.resourceCheck() {
+		healthy = false
+	}
+	
+	// 检查队列状态
+	if len(vo.asyncQueue) > cap(vo.asyncQueue)*8/10 { // 队列使用超过80%
+		healthy = false
+	}
+	
+	if healthy {
+		vo.healthChecker.isHealthy = true
+		vo.healthChecker.failureCount = 0
+	} else {
+		vo.healthChecker.failureCount++
+		if vo.healthChecker.failureCount >= vo.healthChecker.maxFailures {
+			vo.healthChecker.isHealthy = false
+		}
+	}
+	
+	vo.healthChecker.lastCheck = time.Now()
+}
+
+func (vo *VideoOptimization) updateThroughput() {
+	vo.metrics.mu.Lock()
+	defer vo.metrics.mu.Unlock()
+	
+	now := time.Now()
+	elapsed := now.Sub(vo.metrics.lastUpdate).Seconds()
+	if elapsed > 0 {
+		vo.metrics.throughput = float64(vo.metrics.successRequests) / elapsed
+	}
+}
+
+// 辅助函数
+func min(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// OptimizedPreprocessImage 优化的图像预处理方法 - 极致性能版本 + CUDA加速
 func (vo *VideoOptimization) OptimizedPreprocessImage(img image.Image, inputWidth, inputHeight int) ([]float32, error) {
+	// 如果启用CUDA加速，优先使用CUDA预处理
+	if vo.enableCUDA && vo.cudaAccelerator != nil {
+		result, err := vo.cudaAccelerator.PreprocessImageCUDA(img, inputWidth, inputHeight)
+		if err == nil {
+			return result, nil
+		}
+		// CUDA失败时回退到CPU模式
+		fmt.Printf("⚠️ CUDA预处理失败，回退到CPU模式: %v\n", err)
+	}
+	
+	// 使用CPU极致性能预处理
 	return vo.extremePreprocessImage(img, inputWidth, inputHeight)
 }
 
@@ -388,6 +839,35 @@ func (vo *VideoOptimization) IsGPUEnabled() bool {
 	return vo.enableGPU
 }
 
+// IsCUDAEnabled 检查是否启用CUDA加速
+func (vo *VideoOptimization) IsCUDAEnabled() bool {
+	return vo.enableCUDA && vo.cudaAccelerator != nil
+}
+
+// GetCUDADeviceID 获取CUDA设备ID
+func (vo *VideoOptimization) GetCUDADeviceID() int {
+	return vo.cudaDeviceID
+}
+
+// GetCUDAPerformanceMetrics 获取CUDA性能指标
+func (vo *VideoOptimization) GetCUDAPerformanceMetrics() map[string]interface{} {
+	if !vo.IsCUDAEnabled() {
+		return map[string]interface{}{
+			"enabled": false,
+			"error":   "CUDA未启用或初始化失败",
+		}
+	}
+	return vo.cudaAccelerator.GetPerformanceMetrics()
+}
+
+// OptimizeCUDAMemory 优化CUDA内存使用
+func (vo *VideoOptimization) OptimizeCUDAMemory() error {
+	if !vo.IsCUDAEnabled() {
+		return fmt.Errorf("CUDA未启用")
+	}
+	return vo.cudaAccelerator.OptimizeMemoryUsage()
+}
+
 // GetPreprocessBuffer 获取预处理缓冲区
 func (vo *VideoOptimization) GetPreprocessBuffer() [][]float32 {
 	return vo.preprocessBuf
@@ -415,7 +895,7 @@ func (vo *VideoOptimization) OptimizedDetectImage(detector *YOLO, img image.Imag
 	return detector.detectWithPreprocessedData(data, img)
 }
 
-// BatchDetectImages 批量检测图像 - 极致GPU性能
+// BatchDetectImages 批量检测图像 - 极致GPU性能 + CUDA加速
 func (vo *VideoOptimization) BatchDetectImages(detector *YOLO, images []image.Image) ([][]Detection, error) {
 	if len(images) == 0 {
 		return nil, nil
@@ -429,6 +909,25 @@ func (vo *VideoOptimization) BatchDetectImages(detector *YOLO, images []image.Im
 	}
 	if inputHeight == 0 {
 		inputHeight = detector.config.InputSize
+	}
+
+	// 如果启用CUDA加速，优先使用CUDA批处理
+	if vo.enableCUDA && vo.cudaAccelerator != nil {
+		batchData, err := vo.cudaAccelerator.BatchPreprocessImagesCUDA(images, inputWidth, inputHeight)
+		if err == nil {
+			// CUDA批处理成功，进行检测
+			results := make([][]Detection, len(images))
+			for i, data := range batchData {
+				detections, err := detector.detectWithPreprocessedData(data, images[i])
+				if err != nil {
+					return nil, fmt.Errorf("检测图像 %d 失败: %v", i, err)
+				}
+				results[i] = detections
+			}
+			return results, nil
+		}
+		// CUDA失败时回退到CPU模式
+		fmt.Printf("⚠️ CUDA批处理失败，回退到CPU模式: %v\n", err)
 	}
 
 	// 使用最大批处理大小
@@ -548,11 +1047,148 @@ func (vo *VideoOptimization) GetParallelWorkers() int {
 	return vo.parallelWorkers
 }
 
-// Close 关闭VideoOptimization，清理资源
+// GetStabilityStatus 获取稳定性状态信息 - 疯狂调用监控
+func (vo *VideoOptimization) GetStabilityStatus() map[string]interface{} {
+	status := make(map[string]interface{})
+	
+	// 熔断器状态
+	vo.circuitBreaker.mu.RLock()
+	status["circuit_breaker"] = map[string]interface{}{
+		"state":         vo.circuitBreaker.state,
+		"failure_count": vo.circuitBreaker.failureCount,
+		"last_fail":     vo.circuitBreaker.lastFailTime,
+	}
+	vo.circuitBreaker.mu.RUnlock()
+	
+	// 限流器状态
+	vo.rateLimiter.mu.Lock()
+	status["rate_limiter"] = map[string]interface{}{
+		"tokens":      vo.rateLimiter.tokens,
+		"max_tokens":  vo.rateLimiter.maxTokens,
+		"refill_rate": vo.rateLimiter.refillRate,
+	}
+	vo.rateLimiter.mu.Unlock()
+	
+	// 资源监控状态
+	vo.resourceMonitor.mu.RLock()
+	status["resource_monitor"] = map[string]interface{}{
+		"memory_usage":     vo.resourceMonitor.memoryUsage,
+		"goroutine_count":  vo.resourceMonitor.goroutineCount,
+		"cpu_usage":        vo.resourceMonitor.cpuUsage,
+		"max_memory":       vo.resourceMonitor.maxMemory,
+		"max_goroutines":   vo.resourceMonitor.maxGoroutines,
+	}
+	vo.resourceMonitor.mu.RUnlock()
+	
+	// 健康检查状态
+	vo.healthChecker.mu.RLock()
+	status["health_checker"] = map[string]interface{}{
+		"is_healthy":     vo.healthChecker.isHealthy,
+		"failure_count":  vo.healthChecker.failureCount,
+		"last_check":     vo.healthChecker.lastCheck,
+	}
+	vo.healthChecker.mu.RUnlock()
+	
+	// 性能指标
+	vo.metrics.mu.RLock()
+	status["performance_metrics"] = map[string]interface{}{
+		"total_requests":   vo.metrics.totalRequests,
+		"success_requests": vo.metrics.successRequests,
+		"failed_requests":  vo.metrics.failedRequests,
+		"avg_latency":      vo.metrics.avgLatency,
+		"max_latency":      vo.metrics.maxLatency,
+		"min_latency":      vo.metrics.minLatency,
+		"throughput":       vo.metrics.throughput,
+	}
+	vo.metrics.mu.RUnlock()
+	
+	return status
+}
+
+// ResetStabilityMetrics 重置稳定性指标 - 用于长期运行重置
+func (vo *VideoOptimization) ResetStabilityMetrics() {
+	// 重置熔断器
+	vo.circuitBreaker.mu.Lock()
+	vo.circuitBreaker.state = Closed
+	vo.circuitBreaker.failureCount = 0
+	vo.circuitBreaker.mu.Unlock()
+	
+	// 重置性能指标
+	vo.metrics.mu.Lock()
+	vo.metrics.totalRequests = 0
+	vo.metrics.successRequests = 0
+	vo.metrics.failedRequests = 0
+	vo.metrics.avgLatency = 0
+	vo.metrics.maxLatency = 0
+	vo.metrics.minLatency = time.Hour
+	vo.metrics.throughput = 0
+	vo.metrics.lastUpdate = time.Now()
+	vo.metrics.mu.Unlock()
+	
+	// 重置健康检查
+	vo.healthChecker.mu.Lock()
+	vo.healthChecker.isHealthy = true
+	vo.healthChecker.failureCount = 0
+	vo.healthChecker.lastCheck = time.Now()
+	vo.healthChecker.mu.Unlock()
+}
+
+// AdjustPerformanceSettings 动态调整性能设置 - 疯狂调用优化
+func (vo *VideoOptimization) AdjustPerformanceSettings(maxMemoryMB int64, maxGoroutines int64, maxCPU float64) {
+	vo.resourceMonitor.mu.Lock()
+	defer vo.resourceMonitor.mu.Unlock()
+	
+	vo.resourceMonitor.maxMemory = maxMemoryMB * 1024 * 1024
+	vo.resourceMonitor.maxGoroutines = maxGoroutines
+	vo.resourceMonitor.maxCPU = maxCPU
+}
+
+// SetRateLimitSettings 动态调整限流设置 - 疯狂调用控制
+func (vo *VideoOptimization) SetRateLimitSettings(maxTokens, refillRate int64) {
+	vo.rateLimiter.mu.Lock()
+	defer vo.rateLimiter.mu.Unlock()
+	
+	vo.rateLimiter.maxTokens = maxTokens
+	vo.rateLimiter.refillRate = refillRate
+	vo.rateLimiter.tokens = maxTokens // 立即生效
+}
+
+// SetCircuitBreakerSettings 动态调整熔断器设置 - 疯狂调用保护
+func (vo *VideoOptimization) SetCircuitBreakerSettings(maxFailures int64, timeout, retryTimeout time.Duration) {
+	vo.circuitBreaker.mu.Lock()
+	defer vo.circuitBreaker.mu.Unlock()
+	
+	vo.circuitBreaker.maxFailures = maxFailures
+	vo.circuitBreaker.timeout = timeout
+	vo.circuitBreaker.retryTimeout = retryTimeout
+}
+
+// Close 关闭VideoOptimization，清理资源 - 疯狂调用安全关闭 + CUDA加速
 func (vo *VideoOptimization) Close() {
+	// 设置关闭标志
+	atomic.StoreInt64(&vo.isShutdown, 1)
+	
+	// 取消上下文，通知所有监控循环退出
+	vo.cancel()
+	
+	// 关闭CUDA加速器
+	if vo.cudaAccelerator != nil {
+		fmt.Println("🔒 正在关闭CUDA加速器...")
+		vo.cudaAccelerator.Close()
+		vo.cudaAccelerator = nil
+	}
+	
+	// 等待一小段时间让工作线程优雅退出
+	time.Sleep(100 * time.Millisecond)
+	
 	// 关闭异步队列，这会导致所有asyncWorker退出
 	if vo.asyncQueue != nil {
 		close(vo.asyncQueue)
+	}
+	
+	// 等待所有工作线程完成
+	for i := 0; i < vo.parallelWorkers; i++ {
+		<-vo.workerPool
 	}
 	
 	// 清空结果通道
@@ -568,14 +1204,44 @@ func (vo *VideoOptimization) Close() {
 			}
 		}
 	}
+	
+	fmt.Println("🔒 VideoOptimization 已安全关闭（包含CUDA资源）")
 }
 
-// IsHealthy 检查VideoOptimization的健康状态
+// IsHealthy 检查VideoOptimization的健康状态 - 疯狂调用健康检查
 func (vo *VideoOptimization) IsHealthy() bool {
+	// 检查是否已关闭
+	if atomic.LoadInt64(&vo.isShutdown) == 1 {
+		return false
+	}
+	
 	if vo.asyncQueue == nil || vo.processDone == nil || vo.workerPool == nil {
 		return false
 	}
 	
-	// 检查是否有可用的工作线程
-	return len(vo.workerPool) > 0
+	// 检查健康检查器状态
+	vo.healthChecker.mu.RLock()
+	isHealthy := vo.healthChecker.isHealthy
+	vo.healthChecker.mu.RUnlock()
+	
+	if !isHealthy {
+		return false
+	}
+	
+	// 检查熔断器状态
+	vo.circuitBreaker.mu.RLock()
+	circuitOpen := vo.circuitBreaker.state == Open
+	vo.circuitBreaker.mu.RUnlock()
+	
+	if circuitOpen {
+		return false
+	}
+	
+	// 检查队列状态
+	if len(vo.asyncQueue) > cap(vo.asyncQueue)*9/10 { // 队列使用超过90%
+		return false
+	}
+	
+	// 检查资源使用
+	return vo.resourceCheck()
 }

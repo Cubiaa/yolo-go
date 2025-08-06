@@ -14,10 +14,11 @@ func main() {
 
 	// 创建YOLO检测器，启用GPU
 	config := &yolo.YOLOConfig{
-		ModelPath:  "yolov8n.onnx",
-		ClassPath:  "coco.yaml",
-		UseGPU:     true, // 启用GPU
-		InputSize:  640,
+		ModelPath:   "yolov8n.onnx",
+		ClassPath:   "coco.yaml",
+		UseGPU:      true, // 启用GPU
+		InputSize:   640,
+		LibraryPath: "D:\\onnxruntime-win-x64-1.22.1\\lib\\onnxruntime.dll",
 	}
 	detector, err := yolo.NewYOLO(config)
 	if err != nil {

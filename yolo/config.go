@@ -15,6 +15,10 @@ type YOLOConfig struct {
 	GPUDeviceID int    // GPU设备ID（默认0，仅在UseGPU=true时有效）
 	LibraryPath string // ONNX Runtime库路径
 	AutoCreateConfig bool // 是否自动创建配置文件（默认false）
+	// CUDA加速配置
+	UseCUDA      bool   // 是否使用CUDA加速（需要CUDA库支持）
+	CUDADeviceID int    // CUDA设备ID（默认0，仅在UseCUDA=true时有效）
+	CUDAMemoryPool bool // 是否启用CUDA内存池优化（默认true）
 }
 
 // DetectionOptions 检测选项
@@ -181,12 +185,42 @@ func detectModelInputSize(modelPath string) int {
 // WithGPU 设置是否使用GPU
 func (c *YOLOConfig) WithGPU(use bool) *YOLOConfig {
 	c.UseGPU = use
+	// 自动启用CUDA加速以获得最佳性能
+	if use {
+		c.UseCUDA = true
+		c.CUDAMemoryPool = true
+		fmt.Println("🚀 GPU模式已启用，自动启用CUDA加速以获得最佳性能")
+	} else {
+		c.UseCUDA = false
+		c.CUDAMemoryPool = false
+	}
 	return c
 }
 
 // WithGPUDeviceID 设置GPU设备ID（仅在UseGPU=true时有效）
 func (c *YOLOConfig) WithGPUDeviceID(deviceID int) *YOLOConfig {
 	c.GPUDeviceID = deviceID
+	return c
+}
+
+// WithCUDA 设置是否使用CUDA加速
+func (c *YOLOConfig) WithCUDA(use bool) *YOLOConfig {
+	c.UseCUDA = use
+	if use {
+		c.CUDAMemoryPool = true // 默认启用内存池
+	}
+	return c
+}
+
+// WithCUDADeviceID 设置CUDA设备ID
+func (c *YOLOConfig) WithCUDADeviceID(deviceID int) *YOLOConfig {
+	c.CUDADeviceID = deviceID
+	return c
+}
+
+// WithCUDAMemoryPool 设置是否启用CUDA内存池
+func (c *YOLOConfig) WithCUDAMemoryPool(enable bool) *YOLOConfig {
+	c.CUDAMemoryPool = enable
 	return c
 }
 
@@ -306,6 +340,55 @@ func ExtremePerformanceConfig() *YOLOConfig {
 			LibraryPath: "",
 		}
 	}
+}
+
+// CUDAAcceleratedConfig CUDA加速配置 - 启用CUDA库加速
+func CUDAAcceleratedConfig() *YOLOConfig {
+	config := &YOLOConfig{
+		InputSize:      640,
+		UseGPU:         true,
+		GPUDeviceID:    0,
+		UseCUDA:        true,
+		CUDADeviceID:   0,
+		CUDAMemoryPool: true,
+		LibraryPath:    "",
+	}
+	
+	// 检查GPU和CUDA可用性
+	if !IsGPUAvailable() {
+		config.UseGPU = false
+		config.UseCUDA = false
+		fmt.Println("⚠️ GPU不可用，CUDA配置已回退到CPU模式")
+	} else {
+		fmt.Println("🚀 CUDA加速配置：GPU+CUDA模式，输入尺寸640x640")
+	}
+	
+	return config
+}
+
+// ExtremeCUDAConfig 极致CUDA配置 - 最高性能CUDA加速
+func ExtremeCUDAConfig() *YOLOConfig {
+	config := &YOLOConfig{
+		InputSize:      1024, // 更大输入尺寸以充分利用CUDA
+		UseGPU:         true,
+		GPUDeviceID:    0,
+		UseCUDA:        true,
+		CUDADeviceID:   0,
+		CUDAMemoryPool: true,
+		LibraryPath:    "",
+	}
+	
+	// 检查GPU和CUDA可用性
+	if !IsGPUAvailable() {
+		config.UseGPU = false
+		config.UseCUDA = false
+		config.InputSize = 640 // 回退到较小尺寸
+		fmt.Println("⚠️ GPU不可用，极致CUDA配置已回退到CPU模式")
+	} else {
+		fmt.Println("🚀 极致CUDA配置：GPU+CUDA模式，输入尺寸1024x1024")
+	}
+	
+	return config
 }
 
 // 预设配置（检测器级别）

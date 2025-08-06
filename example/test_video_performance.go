@@ -71,6 +71,7 @@ func testSingleVideoConfig(videoPath string, inputSize int) {
 	
 	config := yolo.DefaultConfig().
 		WithGPU(true).
+		WithLibraryPath("D:\\onnxruntime-win-x64-1.22.1\\lib\\onnxruntime.dll").
 		WithInputSize(640) // 固定使用640，匹配yolo12x.onnx模型
 
 	// 创建检测器

@@ -19,7 +19,7 @@ type VidioVideoProcessor struct {
 func NewVidioVideoProcessor(detector *YOLO) *VidioVideoProcessor {
 	return &VidioVideoProcessor{
 		detector:     detector,
-		optimization: NewVideoOptimization(detector.config.UseGPU),
+		optimization: NewVideoOptimizationWithCUDA(detector.config.UseGPU, detector.config.UseCUDA, detector.config.CUDADeviceID),
 	}
 }
 
@@ -27,7 +27,7 @@ func NewVidioVideoProcessor(detector *YOLO) *VidioVideoProcessor {
 func NewVidioVideoProcessorWithOptions(detector *YOLO, options *DetectionOptions) *VidioVideoProcessor {
 	return &VidioVideoProcessor{
 		detector:     detector,
-		optimization: NewVideoOptimization(detector.config.UseGPU),
+		optimization: NewVideoOptimizationWithCUDA(detector.config.UseGPU, detector.config.UseCUDA, detector.config.CUDADeviceID),
 	}
 }
 
