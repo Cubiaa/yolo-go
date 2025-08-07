@@ -333,10 +333,27 @@ func (ca *CUDAAccelerator) Close() error {
 
 // isCUDAAvailable 检查CUDA是否可用
 func isCUDAAvailable() bool {
-	// 这里应该调用CUDA Runtime API检查
-	// 为了演示，我们假设CUDA可用
-	// 实际实现需要调用 cudaGetDeviceCount() 等函数
-	return true // 简化实现
+	// 尝试创建临时会话选项来测试CUDA
+	sessionOptions, err := ort.NewSessionOptions()
+	if err != nil {
+		return false
+	}
+	defer sessionOptions.Destroy()
+
+	// 使用defer recover来安全检测CUDA
+	defer func() {
+		if r := recover(); r != nil {
+			// CUDA不可用时可能会panic
+		}
+	}()
+
+	// 尝试添加CUDA执行提供者
+	err = sessionOptions.AppendExecutionProviderCUDA(nil)
+	if err != nil {
+		return false
+	}
+
+	return true
 }
 
 // newCUDAMemoryPool 创建CUDA内存池

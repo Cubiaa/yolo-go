@@ -9,32 +9,29 @@ import (
 )
 
 // HighEndGPUOptimizedConfig 高端GPU极致优化配置
-// 支持RTX 4090/4080/3090等高端显卡，自动检测显存大小进行优化
+// 支持RTX 4090/4080/3090等高端显卡，强制要求GPU可用
+// 注意：此配置强制要求GPU，如果GPU不可用会在NewYOLO时返回错误
 func HighEndGPUOptimizedConfig() *YOLOConfig {
 	return RTX4090OptimizedConfig() // 向后兼容
 }
 
 // RTX4090OptimizedConfig RTX 4090专用极致优化配置
 // 针对RTX 4090的24GB显存和10752个CUDA核心进行优化
+// 注意：此配置强制要求GPU，如果GPU不可用会在NewYOLO时返回错误
 func RTX4090OptimizedConfig() *YOLOConfig {
 	config := &YOLOConfig{
-		InputSize:      640, // 保持640以平衡精度和速度
-		UseGPU:         true,
+		InputSize:      640,
+		UseGPU:         true,  // 强制要求GPU
 		GPUDeviceID:    0,
-		UseCUDA:        true,
+		UseCUDA:        true,  // 强制要求CUDA
 		CUDADeviceID:   0,
 		CUDAMemoryPool: true,
 		LibraryPath:    "",
 	}
 
-	// 检查GPU和CUDA可用性
-	if !IsGPUAvailable() {
-		config.UseGPU = false
-		config.UseCUDA = false
-		fmt.Println("⚠️ GPU不可用，RTX 4090配置已回退到CPU模式")
-	} else {
-		fmt.Println("🚀 RTX 4090极致优化配置：24GB显存+10752 CUDA核心")
-	}
+	fmt.Println("🚀 RTX 4090极致优化配置：24GB显存+10752 CUDA核心")
+	fmt.Println("⚠️  注意：此配置强制要求GPU，如果GPU不可用将返回错误")
+	fmt.Println("💡 如需自动适配，请使用 DefaultConfig().WithGPU(true)")
 
 	return config
 }
