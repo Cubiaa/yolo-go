@@ -354,14 +354,7 @@ func CUDAAcceleratedConfig() *YOLOConfig {
 		LibraryPath:    "",
 	}
 	
-	// 检查GPU和CUDA可用性
-	if !IsGPUAvailable() {
-		config.UseGPU = false
-		config.UseCUDA = false
-		fmt.Println("⚠️ GPU不可用，CUDA配置已回退到CPU模式")
-	} else {
-		fmt.Println("🚀 CUDA加速配置：GPU+CUDA模式，输入尺寸640x640")
-	}
+	fmt.Println("🚀 CUDA加速配置：GPU+CUDA模式，输入尺寸640x640")
 	
 	return config
 }
@@ -378,15 +371,7 @@ func ExtremeCUDAConfig() *YOLOConfig {
 		LibraryPath:    "",
 	}
 	
-	// 检查GPU和CUDA可用性
-	if !IsGPUAvailable() {
-		config.UseGPU = false
-		config.UseCUDA = false
-		config.InputSize = 640 // 回退到较小尺寸
-		fmt.Println("⚠️ GPU不可用，极致CUDA配置已回退到CPU模式")
-	} else {
-		fmt.Println("🚀 极致CUDA配置：GPU+CUDA模式，输入尺寸1024x1024")
-	}
+	fmt.Println("🚀 极致CUDA配置：GPU+CUDA模式，输入尺寸1024x1024")
 	
 	return config
 }
