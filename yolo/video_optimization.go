@@ -43,6 +43,12 @@ type VideoOptimization struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	isShutdown      int64 // atomic
+
+	// 垃圾回收优化字段
+	frameCounter    int64 // 帧计数器，用于定期垃圾回收
+	gcInterval      int64 // GC间隔，默认每20-50帧清理一次
+	lastGCTime      time.Time // 上次GC时间
+	gcMutex         sync.Mutex // GC操作互斥锁
 }
 
 // ProcessTask 异步处理任务
@@ -268,6 +274,10 @@ func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) 
 		ctx:             ctx,
 		cancel:          cancel,
 		isShutdown:      0,
+		// 垃圾回收优化字段
+		frameCounter:    0,
+		gcInterval:      30, // 默认每30帧清理一次，平衡性能与内存
+		lastGCTime:      time.Now(),
 	}
 
 	// 启动异步处理工作线程
@@ -930,7 +940,12 @@ func (vo *VideoOptimization) OptimizedDetectImage(detector *YOLO, img image.Imag
 	}
 
 	// 调用检测器的内部方法，跳过重复预处理
-	return detector.detectWithPreprocessedData(data, img)
+	result, err := detector.detectWithPreprocessedData(data, img)
+	
+	// 智能垃圾回收 - 安全地清理临时内存
+	vo.SmartGarbageCollect(false)
+	
+	return result, err
 }
 
 // BatchDetectImages 批量检测图像 - 极致GPU性能 + CUDA加速
@@ -962,6 +977,10 @@ func (vo *VideoOptimization) BatchDetectImages(detector *YOLO, images []image.Im
 				}
 				results[i] = detections
 			}
+			
+			// ✅ CUDA批处理完成后安全清理内存（结果已保存到results中）
+			vo.SmartGarbageCollect(len(images) >= 20)
+			
 			return results, nil
 		}
 		// CUDA失败时回退到CPU模式
@@ -1015,6 +1034,9 @@ func (vo *VideoOptimization) BatchDetectImages(detector *YOLO, images []image.Im
 	if firstError != nil {
 		return nil, firstError
 	}
+
+	// ✅ CPU批处理完成后安全清理内存（结果已保存到results中）
+	vo.SmartGarbageCollect(len(images) >= 20)
 
 	return results, nil
 }
@@ -1282,4 +1304,57 @@ func (vo *VideoOptimization) IsHealthy() bool {
 
 	// 检查资源使用
 	return vo.resourceCheck()
+}
+
+// SmartGarbageCollect 智能垃圾回收 - 安全地清理内存而不影响保存功能
+func (vo *VideoOptimization) SmartGarbageCollect(forceGC bool) {
+	vo.gcMutex.Lock()
+	defer vo.gcMutex.Unlock()
+
+	// 增加帧计数器
+	atomic.AddInt64(&vo.frameCounter, 1)
+	currentFrame := atomic.LoadInt64(&vo.frameCounter)
+
+	// 检查是否需要执行GC
+	shouldGC := forceGC || (currentFrame%vo.gcInterval == 0)
+
+	// 时间间隔检查 - 避免过于频繁的GC
+	timeSinceLastGC := time.Since(vo.lastGCTime)
+	if !forceGC && timeSinceLastGC < 5*time.Second {
+		return
+	}
+
+	if shouldGC {
+		// 执行垃圾回收
+		runtime.GC()
+		vo.lastGCTime = time.Now()
+		
+		// 可选：强制释放操作系统内存
+		runtime.GC()
+	}
+}
+
+// SetGCInterval 设置垃圾回收间隔
+func (vo *VideoOptimization) SetGCInterval(interval int64) {
+	vo.gcMutex.Lock()
+	defer vo.gcMutex.Unlock()
+	vo.gcInterval = interval
+}
+
+// GetGCStats 获取垃圾回收统计信息
+func (vo *VideoOptimization) GetGCStats() map[string]interface{} {
+	vo.gcMutex.Lock()
+	defer vo.gcMutex.Unlock()
+	
+	return map[string]interface{}{
+		"frameCounter": atomic.LoadInt64(&vo.frameCounter),
+		"gcInterval":   vo.gcInterval,
+		"lastGCTime":   vo.lastGCTime,
+		"timeSinceLastGC": time.Since(vo.lastGCTime),
+	}
+}
+
+// ResetFrameCounter 重置帧计数器
+func (vo *VideoOptimization) ResetFrameCounter() {
+	atomic.StoreInt64(&vo.frameCounter, 0)
 }
