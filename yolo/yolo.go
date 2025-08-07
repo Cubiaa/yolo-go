@@ -373,11 +373,13 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 
 	// 初始化GPU极致优化模块，支持CUDA加速
 	yolo.optimization = NewVideoOptimizationWithCUDA(yoloConfig.UseGPU, yoloConfig.UseCUDA, yoloConfig.CUDADeviceID)
-	fmt.Printf("🚀 GPU极致优化模块已初始化 (GPU: %v, CUDA: %v, 批处理大小: %d, 并行工作线程: %d)\n",
-		yolo.optimization.IsGPUEnabled(),
-		yolo.optimization.IsCUDAEnabled(),
-		yolo.optimization.GetBatchSize(),
-		yolo.optimization.GetParallelWorkers())
+	if yolo.optimization.IsGPUEnabled() || yolo.optimization.IsCUDAEnabled() {
+		fmt.Printf("🚀 GPU极致优化模块已初始化 (GPU: %v, CUDA: %v, 批处理大小: %d, 并行工作线程: %d)\n",
+			yolo.optimization.IsGPUEnabled(),
+			yolo.optimization.IsCUDAEnabled(),
+			yolo.optimization.GetBatchSize(),
+			yolo.optimization.GetParallelWorkers())
+	}
 
 	return yolo, nil
 }

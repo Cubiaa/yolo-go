@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	ort "github.com/yalue/onnxruntime_go"
 )
 
 // CUDAAccelerator CUDA加速器 - 专门处理CUDA相关的GPU加速

@@ -9,16 +9,16 @@ import (
 )
 
 // HighEndGPUOptimizedConfig 高端GPU极致优化配置
-// 支持RTX 4090/4080/3090等高端显卡，强制要求GPU可用
+// 支持高端显卡，强制要求GPU可用
 // 注意：此配置强制要求GPU，如果GPU不可用会在NewYOLO时返回错误
 func HighEndGPUOptimizedConfig() *YOLOConfig {
-	return RTX4090OptimizedConfig() // 向后兼容
+	return HighPerformanceGPUConfig() // 向后兼容
 }
 
-// RTX4090OptimizedConfig RTX 4090专用极致优化配置
-// 针对RTX 4090的24GB显存和10752个CUDA核心进行优化
+// HighPerformanceGPUConfig 高性能GPU专用极致优化配置
+// 针对高端显卡的大显存和多核心进行优化
 // 注意：此配置强制要求GPU，如果GPU不可用会在NewYOLO时返回错误
-func RTX4090OptimizedConfig() *YOLOConfig {
+func HighPerformanceGPUConfig() *YOLOConfig {
 	config := &YOLOConfig{
 		InputSize:      640,
 		UseGPU:         true,  // 强制要求GPU
@@ -29,7 +29,7 @@ func RTX4090OptimizedConfig() *YOLOConfig {
 		LibraryPath:    "",
 	}
 
-	fmt.Println("🚀 RTX 4090极致优化配置：24GB显存+10752 CUDA核心")
+	fmt.Println("🚀 高性能GPU极致优化配置：大显存+多CUDA核心")
 	fmt.Println("⚠️  注意：此配置强制要求GPU，如果GPU不可用将返回错误")
 	fmt.Println("💡 如需自动适配，请使用 DefaultConfig().WithGPU(true)")
 
@@ -37,9 +37,9 @@ func RTX4090OptimizedConfig() *YOLOConfig {
 }
 
 // NewHighEndGPUVideoOptimization 创建高端GPU通用视频优化实例
-// 自动检测显存大小并调整配置：RTX 4090(24GB), RTX 4080(16GB), RTX 3090(24GB)等
+// 自动检测显存大小并调整配置：大显存显卡(20GB+), 中高端显卡(12-16GB), 中端显卡(8-10GB)等
 func NewHighEndGPUVideoOptimization() *VideoOptimization {
-	return NewRTX4090VideoOptimization() // 使用最高配置作为默认
+	return NewHighPerformanceGPUVideoOptimization() // 使用最高配置作为默认
 }
 
 // NewAdaptiveGPUVideoOptimization 创建自适应GPU视频优化实例
@@ -56,21 +56,21 @@ func NewAdaptiveGPUVideoOptimization() *VideoOptimization {
 
 	// 根据显存大小调整配置
 	switch {
-	case vramGB >= 20: // RTX 4090 (24GB), RTX 3090 (24GB)
-		batchSize = cpuCores * 8
-		maxBatchSize = cpuCores * 16
-		parallelWorkers = cpuCores * 6
-		memoryPoolGB = 20
-		gcInterval = 30
-	case vramGB >= 12: // RTX 4080 (16GB), RTX 3080 Ti (12GB)
-		batchSize = cpuCores * 6
-		maxBatchSize = cpuCores * 12
-		parallelWorkers = cpuCores * 4
-		memoryPoolGB = 12
-		gcInterval = 25
-	case vramGB >= 8: // RTX 3070 Ti (8GB), RTX 3080 (10GB)
-		batchSize = cpuCores * 4
-		maxBatchSize = cpuCores * 8
+	case vramGB >= 20: // 大显存显卡 (20GB+)
+			batchSize = cpuCores * 8
+			maxBatchSize = cpuCores * 16
+			parallelWorkers = cpuCores * 6
+			memoryPoolGB = 20
+		case vramGB >= 12: // 中高端显卡 (12-16GB)
+			batchSize = cpuCores * 6
+			maxBatchSize = cpuCores * 12
+			parallelWorkers = cpuCores * 4
+			memoryPoolGB = 12
+		case vramGB >= 8: // 中端显卡 (8-10GB)
+			batchSize = cpuCores * 4
+			maxBatchSize = cpuCores * 8
+			parallelWorkers = cpuCores * 3
+			memoryPoolGB = 8
 		parallelWorkers = cpuCores * 3
 		memoryPoolGB = 6
 		gcInterval = 20
@@ -165,11 +165,11 @@ func NewAdaptiveGPUVideoOptimization() *VideoOptimization {
 	return vo
 }
 
-// NewRTX4090VideoOptimization 创建RTX 4090专用视频优化实例
-func NewRTX4090VideoOptimization() *VideoOptimization {
+// NewHighPerformanceGPUVideoOptimization 创建高性能GPU专用视频优化实例
+func NewHighPerformanceGPUVideoOptimization() *VideoOptimization {
 	cpuCores := runtime.NumCPU()
 
-	// RTX 4090专用配置 - 充分利用24GB显存
+	// 高性能GPU专用配置 - 充分利用大显存
 	batchSize := cpuCores * 8       // 大批处理，利用大显存
 	maxBatchSize := cpuCores * 16   // 极大批处理
 	parallelWorkers := cpuCores * 6 // 更多并行工作线程
@@ -213,11 +213,13 @@ func NewRTX4090VideoOptimization() *VideoOptimization {
 	// 创建上下文用于优雅关闭
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 创建RTX 4090专用CUDA加速器
-	cudaAccelerator, err := NewRTX4090CUDAAccelerator(0)
+	// 创建高性能GPU专用CUDA加速器
+	cudaAccelerator, err := NewHighPerformanceGPUCUDAAccelerator(0)
 	if err != nil {
-		fmt.Printf("⚠️ RTX 4090 CUDA加速器创建失败，回退到标准模式: %v\n", err)
+		fmt.Printf("⚠️ 高性能GPU CUDA加速器创建失败，回退到标准模式: %v\n", err)
 		cudaAccelerator = nil
+	} else {
+		fmt.Printf("🚀 高性能GPU CUDA加速器初始化成功，设备ID: %d\n", 0)
 	}
 
 	vo := &VideoOptimization{
@@ -243,7 +245,7 @@ func NewRTX4090VideoOptimization() *VideoOptimization {
 		metrics:         &PerformanceMetrics{minLatency: time.Hour},
 		ctx:             ctx,
 		cancel:          cancel,
-		gcInterval:      30, // RTX 4090显存大，可以减少GC频率
+		gcInterval:      30, // 高性能GPU显存大，可以减少GC频率
 		lastGCTime:      time.Now(),
 	}
 
@@ -276,13 +278,13 @@ func NewAdaptiveCUDAAccelerator(deviceID int, memoryPoolGB int64) (*CUDAAccelera
 	// 根据显存大小调整流数量和批处理大小
 	var streamCount, batchSize int
 	switch {
-	case memoryPoolGB >= 20: // 高端GPU (RTX 4090, 3090)
+	case memoryPoolGB >= 20: // 高端GPU (20GB+显存)
 		streamCount = cpuCores * 4
 		batchSize = cpuCores * 64
-	case memoryPoolGB >= 12: // 中高端GPU (RTX 4080, 3080 Ti)
+	case memoryPoolGB >= 12: // 中高端GPU (12-16GB显存)
 		streamCount = cpuCores * 3
 		batchSize = cpuCores * 48
-	case memoryPoolGB >= 8: // 中端GPU (RTX 3070 Ti, 3080)
+	case memoryPoolGB >= 8: // 中端GPU (8-10GB显存)
 		streamCount = cpuCores * 2
 		batchSize = cpuCores * 32
 	default: // 其他GPU
@@ -323,9 +325,6 @@ func NewAdaptiveCUDAAccelerator(deviceID int, memoryPoolGB int64) (*CUDAAccelera
 	// 创建性能监控器
 	performanceMonitor := newCUDAPerformanceMonitor()
 
-	fmt.Printf("🚀 自适应CUDA加速器已启用：%dGB内存池 + %d流 + %d批处理\n",
-		memoryPoolGB, streamCount, batchSize)
-
 	return &CUDAAccelerator{
 		enabled:            true,
 		deviceID:           deviceID,
@@ -338,27 +337,27 @@ func NewAdaptiveCUDAAccelerator(deviceID int, memoryPoolGB int64) (*CUDAAccelera
 	}, nil
 }
 
-// NewRTX4090CUDAAccelerator 创建RTX 4090专用CUDA加速器
-func NewRTX4090CUDAAccelerator(deviceID int) (*CUDAAccelerator, error) {
+// NewHighPerformanceGPUCUDAAccelerator 创建高性能GPU专用CUDA加速器
+func NewHighPerformanceGPUCUDAAccelerator(deviceID int) (*CUDAAccelerator, error) {
 	// 检查CUDA是否可用
 	if !isCUDAAvailable() {
 		return nil, fmt.Errorf("CUDA不可用")
 	}
 
 	cpuCores := runtime.NumCPU()
-	streamCount := cpuCores * 4 // RTX 4090可以支持更多流
+	streamCount := cpuCores * 4 // 高性能GPU可以支持更多流
 
-	// 创建更大的内存池 - 充分利用RTX 4090的24GB显存
+	// 创建更大的内存池 - 充分利用高性能GPU的大显存
 	memoryPool, err := newCUDAMemoryPool(deviceID, 20*1024*1024*1024) // 20GB内存池
 	if err != nil {
-		return nil, fmt.Errorf("创建RTX 4090 CUDA内存池失败: %v", err)
+		return nil, fmt.Errorf("创建高性能GPU CUDA内存池失败: %v", err)
 	}
 
 	// 创建流管理器
 	streamManager, err := newCUDAStreamManager(streamCount)
 	if err != nil {
 		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建RTX 4090 CUDA流管理器失败: %v", err)
+		return nil, fmt.Errorf("创建高性能GPU CUDA流管理器失败: %v", err)
 	}
 
 	// 创建预处理器
@@ -366,22 +365,20 @@ func NewRTX4090CUDAAccelerator(deviceID int) (*CUDAAccelerator, error) {
 	if err != nil {
 		streamManager.Destroy()
 		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建RTX 4090 CUDA预处理器失败: %v", err)
+		return nil, fmt.Errorf("创建高性能GPU CUDA预处理器失败: %v", err)
 	}
 
-	// 创建批处理器 - RTX 4090可以处理更大的批次
+	// 创建批处理器 - 高性能GPU可以处理更大的批次
 	batchProcessor, err := newCUDABatchProcessor(cpuCores * 64) // 超大批处理
 	if err != nil {
 		preprocessor.Destroy()
 		streamManager.Destroy()
 		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建RTX 4090 CUDA批处理器失败: %v", err)
+		return nil, fmt.Errorf("创建高性能GPU CUDA批处理器失败: %v", err)
 	}
 
 	// 创建性能监控器
 	performanceMonitor := newCUDAPerformanceMonitor()
-
-	fmt.Println("🚀 RTX 4090 CUDA加速器已启用：20GB内存池 + 超大批处理")
 
 	return &CUDAAccelerator{
 		enabled:            true,
@@ -400,9 +397,9 @@ func HighEndGPUPerformanceTips() {
 	fmt.Println("\n🚀 高端GPU性能优化建议:")
 	fmt.Println("1. 使用 HighEndGPUOptimizedConfig() 或 NewAdaptiveGPUVideoOptimization() 自动配置")
 	fmt.Println("2. 根据显存大小选择合适的配置:")
-	fmt.Println("   - RTX 4090/3090 (24GB): 批处理128+, 内存池20GB")
-	fmt.Println("   - RTX 4080/3080Ti (12-16GB): 批处理96+, 内存池12GB")
-	fmt.Println("   - RTX 3070Ti/3080 (8-10GB): 批处理64+, 内存池6GB")
+	fmt.Println("   - 高端GPU (20GB+显存): 批处理128+, 内存池20GB")
+	fmt.Println("   - 中高端GPU (12-16GB显存): 批处理96+, 内存池12GB")
+	fmt.Println("   - 中端GPU (8-10GB显存): 批处理64+, 内存池6GB")
 	fmt.Println("3. 并行工作线程: 根据显存自动调整 (CPU核心数 * 2-6)")
 	fmt.Println("4. CUDA流数量: 根据显存自动调整 (CPU核心数 * 2-4)")
 	fmt.Println("5. GC间隔: 显存越大间隔越长 (15-30帧)")
@@ -413,8 +410,8 @@ func HighEndGPUPerformanceTips() {
 	fmt.Println("10. 考虑使用混合精度(FP16)提升性能\n")
 }
 
-// RTX4090PerformanceTips RTX 4090性能优化建议（向后兼容）
-func RTX4090PerformanceTips() {
+// HighPerformanceGPUTips 高性能GPU性能优化建议（向后兼容）
+func HighPerformanceGPUTips() {
 	HighEndGPUPerformanceTips()
 }
 
@@ -424,9 +421,9 @@ func GetGPUBenchmarkConfig(vramGB int) map[string]interface{} {
 	cpuCores := runtime.NumCPU()
 
 	switch {
-	case vramGB >= 20: // RTX 4090, RTX 3090
+	case vramGB >= 20: // 高端GPU, 大显存
 		return map[string]interface{}{
-			"gpu_tier":           "旗舰级 (RTX 4090/3090)",
+			"gpu_tier":           "旗舰级 (20GB+显存)",
 			"vram_size":          fmt.Sprintf("%dGB", vramGB),
 			"memory_pool_size":   "20GB",
 			"batch_size":         cpuCores * 8,
@@ -438,9 +435,9 @@ func GetGPUBenchmarkConfig(vramGB int) map[string]interface{} {
 			"target_time":        "10-20秒 (1000帧视频)",
 			"optimization_level": "极致",
 		}
-	case vramGB >= 12: // RTX 4080, RTX 3080 Ti
+	case vramGB >= 12: // 中高端GPU
 		return map[string]interface{}{
-			"gpu_tier":           "高端级 (RTX 4080/3080Ti)",
+			"gpu_tier":           "高端级 (12-16GB显存)",
 			"vram_size":          fmt.Sprintf("%dGB", vramGB),
 			"memory_pool_size":   "12GB",
 			"batch_size":         cpuCores * 6,
@@ -452,9 +449,9 @@ func GetGPUBenchmarkConfig(vramGB int) map[string]interface{} {
 			"target_time":        "15-30秒 (1000帧视频)",
 			"optimization_level": "高级",
 		}
-	case vramGB >= 8: // RTX 3070 Ti, RTX 3080
+	case vramGB >= 8: // 中端GPU
 		return map[string]interface{}{
-			"gpu_tier":           "中高端级 (RTX 3070Ti/3080)",
+			"gpu_tier":           "中高端级 (8-10GB显存)",
 			"vram_size":          fmt.Sprintf("%dGB", vramGB),
 			"memory_pool_size":   "6GB",
 			"batch_size":         cpuCores * 4,
@@ -483,9 +480,9 @@ func GetGPUBenchmarkConfig(vramGB int) map[string]interface{} {
 	}
 }
 
-// RTX4090BenchmarkConfig RTX 4090基准测试配置（向后兼容）
-func RTX4090BenchmarkConfig() map[string]interface{} {
-	return GetGPUBenchmarkConfig(24) // RTX 4090 有24GB显存
+// HighPerformanceGPUBenchmarkConfig 高性能GPU基准测试配置（向后兼容）
+func HighPerformanceGPUBenchmarkConfig() map[string]interface{} {
+	return GetGPUBenchmarkConfig(24) // 高性能GPU 有大显存
 }
 
 // GetOptimalGPUSettings 获取当前GPU的最优设置建议

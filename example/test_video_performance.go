@@ -125,11 +125,11 @@ func analyzePerformance(inputSize int, processingTime time.Duration) {
 	fmt.Printf("   输入尺寸: %dx%d (yolo12x.onnx固定尺寸)\n", inputSize, inputSize)
 	fmt.Printf("   处理时间: %v\n", processingTime)
 
-	// RTX 4090 + yolo12x.onnx (640x640) 预期性能
+	// 高性能GPU + yolo12x.onnx (640x640) 预期性能
 	expectedTime := 3 * time.Second
 	expectedGPUUsage := "30-50%"
 
-	fmt.Printf("   预期时间: %v (RTX 4090 + yolo12x.onnx)\n", expectedTime)
+	fmt.Printf("   预期时间: %v (高性能GPU + yolo12x.onnx)\n", expectedTime)
 	fmt.Printf("   预期GPU使用率: %s\n", expectedGPUUsage)
 
 	// 性能评估
