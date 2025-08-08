@@ -124,12 +124,8 @@ func NewAdaptiveGPUVideoOptimization() *VideoOptimization {
 	// 创建上下文
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 创建自适应CUDA加速器
-	cudaAccelerator, err := NewAdaptiveCUDAAccelerator(0, memoryPoolGB)
-	if err != nil {
-		fmt.Printf("⚠️ 自适应CUDA加速器创建失败，回退到标准模式: %v\n", err)
-		cudaAccelerator = nil
-	}
+	// 注意：自定义CUDA加速器已移除，现在使用ONNX Runtime CUDA支持
+	fmt.Println("🚀 自适应GPU优化已启用，使用ONNX Runtime CUDA")
 
 	vo := &VideoOptimization{
 		batchSize:       batchSize,
@@ -144,8 +140,8 @@ func NewAdaptiveGPUVideoOptimization() *VideoOptimization {
 		asyncQueue:      asyncQueue,
 		processDone:     processDone,
 		workerPool:      workerPool,
-		cudaAccelerator: cudaAccelerator,
-		enableCUDA:      cudaAccelerator != nil,
+		// cudaAccelerator 字段已移除
+		enableCUDA:      true, // 启用ONNX Runtime CUDA支持
 		cudaDeviceID:    0,
 		circuitBreaker:  &CircuitBreaker{maxFailures: 10, timeout: 30 * time.Second, retryTimeout: 5 * time.Second},
 		rateLimiter:     &RateLimiter{maxTokens: int64(maxBatchSize * 2), refillRate: int64(maxBatchSize)},
@@ -213,14 +209,8 @@ func NewHighPerformanceGPUVideoOptimization() *VideoOptimization {
 	// 创建上下文用于优雅关闭
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 创建高性能GPU专用CUDA加速器
-	cudaAccelerator, err := NewHighPerformanceGPUCUDAAccelerator(0)
-	if err != nil {
-		fmt.Printf("⚠️ 高性能GPU CUDA加速器创建失败，回退到标准模式: %v\n", err)
-		cudaAccelerator = nil
-	} else {
-		fmt.Printf("🚀 高性能GPU CUDA加速器初始化成功，设备ID: %d\n", 0)
-	}
+	// 高性能GPU专用CUDA加速器已移除，仅依赖ONNX Runtime的CUDA支持
+	fmt.Printf("🚀 高性能GPU优化已启用，使用ONNX Runtime CUDA执行提供程序，设备ID: %d\n", 0)
 
 	vo := &VideoOptimization{
 		batchSize:       batchSize,
@@ -235,8 +225,8 @@ func NewHighPerformanceGPUVideoOptimization() *VideoOptimization {
 		asyncQueue:      asyncQueue,
 		processDone:     processDone,
 		workerPool:      workerPool,
-		cudaAccelerator: cudaAccelerator,
-		enableCUDA:      cudaAccelerator != nil,
+		// cudaAccelerator 字段已移除
+		enableCUDA:      true, // 启用ONNX Runtime CUDA支持
 		cudaDeviceID:    0,
 		circuitBreaker:  &CircuitBreaker{maxFailures: 10, timeout: 30 * time.Second, retryTimeout: 5 * time.Second},
 		rateLimiter:     &RateLimiter{maxTokens: int64(maxBatchSize * 2), refillRate: int64(maxBatchSize)},
@@ -265,132 +255,9 @@ func detectVRAMSize() int {
 	return 24 // 默认假设为高端GPU
 }
 
-// NewAdaptiveCUDAAccelerator 创建自适应CUDA加速器
-// 根据显存大小自动调整内存池和批处理配置
-func NewAdaptiveCUDAAccelerator(deviceID int, memoryPoolGB int64) (*CUDAAccelerator, error) {
-	// 检查CUDA是否可用
-	if !isCUDAAvailable() {
-		return nil, fmt.Errorf("CUDA不可用")
-	}
-
-	cpuCores := runtime.NumCPU()
-
-	// 根据显存大小调整流数量和批处理大小
-	var streamCount, batchSize int
-	switch {
-	case memoryPoolGB >= 20: // 高端GPU (20GB+显存)
-		streamCount = cpuCores * 4
-		batchSize = cpuCores * 64
-	case memoryPoolGB >= 12: // 中高端GPU (12-16GB显存)
-		streamCount = cpuCores * 3
-		batchSize = cpuCores * 48
-	case memoryPoolGB >= 8: // 中端GPU (8-10GB显存)
-		streamCount = cpuCores * 2
-		batchSize = cpuCores * 32
-	default: // 其他GPU
-		streamCount = cpuCores * 2
-		batchSize = cpuCores * 16
-	}
-
-	// 创建内存池
-	memoryPool, err := newCUDAMemoryPool(deviceID, memoryPoolGB*1024*1024*1024)
-	if err != nil {
-		return nil, fmt.Errorf("创建自适应CUDA内存池失败: %v", err)
-	}
-
-	// 创建流管理器
-	streamManager, err := newCUDAStreamManager(streamCount)
-	if err != nil {
-		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建自适应CUDA流管理器失败: %v", err)
-	}
-
-	// 创建预处理器
-	preprocessor, err := newCUDAPreprocessor(deviceID)
-	if err != nil {
-		streamManager.Destroy()
-		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建自适应CUDA预处理器失败: %v", err)
-	}
-
-	// 创建批处理器
-	batchProcessor, err := newCUDABatchProcessor(batchSize)
-	if err != nil {
-		preprocessor.Destroy()
-		streamManager.Destroy()
-		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建自适应CUDA批处理器失败: %v", err)
-	}
-
-	// 创建性能监控器
-	performanceMonitor := newCUDAPerformanceMonitor()
-
-	return &CUDAAccelerator{
-		enabled:            true,
-		deviceID:           deviceID,
-		streamCount:        streamCount,
-		memoryPool:         memoryPool,
-		streamManager:      streamManager,
-		preprocessor:       preprocessor,
-		batchProcessor:     batchProcessor,
-		performanceMonitor: performanceMonitor,
-	}, nil
-}
-
-// NewHighPerformanceGPUCUDAAccelerator 创建高性能GPU专用CUDA加速器
-func NewHighPerformanceGPUCUDAAccelerator(deviceID int) (*CUDAAccelerator, error) {
-	// 检查CUDA是否可用
-	if !isCUDAAvailable() {
-		return nil, fmt.Errorf("CUDA不可用")
-	}
-
-	cpuCores := runtime.NumCPU()
-	streamCount := cpuCores * 4 // 高性能GPU可以支持更多流
-
-	// 创建更大的内存池 - 充分利用高性能GPU的大显存
-	memoryPool, err := newCUDAMemoryPool(deviceID, 20*1024*1024*1024) // 20GB内存池
-	if err != nil {
-		return nil, fmt.Errorf("创建高性能GPU CUDA内存池失败: %v", err)
-	}
-
-	// 创建流管理器
-	streamManager, err := newCUDAStreamManager(streamCount)
-	if err != nil {
-		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建高性能GPU CUDA流管理器失败: %v", err)
-	}
-
-	// 创建预处理器
-	preprocessor, err := newCUDAPreprocessor(deviceID)
-	if err != nil {
-		streamManager.Destroy()
-		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建高性能GPU CUDA预处理器失败: %v", err)
-	}
-
-	// 创建批处理器 - 高性能GPU可以处理更大的批次
-	batchProcessor, err := newCUDABatchProcessor(cpuCores * 64) // 超大批处理
-	if err != nil {
-		preprocessor.Destroy()
-		streamManager.Destroy()
-		memoryPool.Destroy()
-		return nil, fmt.Errorf("创建高性能GPU CUDA批处理器失败: %v", err)
-	}
-
-	// 创建性能监控器
-	performanceMonitor := newCUDAPerformanceMonitor()
-
-	return &CUDAAccelerator{
-		enabled:            true,
-		deviceID:           deviceID,
-		streamCount:        streamCount,
-		memoryPool:         memoryPool,
-		streamManager:      streamManager,
-		preprocessor:       preprocessor,
-		batchProcessor:     batchProcessor,
-		performanceMonitor: performanceMonitor,
-	}, nil
-}
+// 注意：NewAdaptiveCUDAAccelerator 和 NewHighPerformanceGPUCUDAAccelerator 函数已移除
+// 原因：自定义CUDA加速器模块已移除，现在仅依赖ONNX Runtime的内置CUDA支持
+// 如需CUDA加速，请在创建YOLO实例时使用 WithGPU(true) 选项
 
 // HighEndGPUPerformanceTips 高端GPU性能优化建议
 func HighEndGPUPerformanceTips() {

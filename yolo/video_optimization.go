@@ -30,7 +30,7 @@ type VideoOptimization struct {
 	processDone     chan *ProcessResult
 
 	// CUDA加速模块
-	cudaAccelerator *CUDAAccelerator
+	// cudaAccelerator 已移除，现在使用ONNX Runtime的内置CUDA支持
 	enableCUDA      bool
 	cudaDeviceID    int
 
@@ -234,18 +234,10 @@ func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) 
 		lastUpdate: time.Now(),
 	}
 
-	// 初始化CUDA加速器（如果启用）
-	var cudaAccelerator *CUDAAccelerator
+	// CUDA加速器模块已移除，仅依赖ONNX Runtime的CUDA支持
+	// enableCUDA参数保留用于兼容性，但不再初始化自定义CUDA加速器
 	if enableCUDA {
-		var err error
-		cudaAccelerator, err = NewCUDAAccelerator(cudaDeviceID)
-		if err != nil {
-			fmt.Printf("⚠️ CUDA加速器初始化失败，回退到CPU模式: %v\n", err)
-			enableCUDA = false
-			cudaAccelerator = nil
-		} else {
-			fmt.Printf("🚀 CUDA加速器初始化成功，设备ID: %d\n", cudaDeviceID)
-		}
+		fmt.Printf("🚀 CUDA支持已启用，使用ONNX Runtime CUDA执行提供程序，设备ID: %d\n", cudaDeviceID)
 	}
 
 	vo := &VideoOptimization{
@@ -261,8 +253,8 @@ func NewVideoOptimizationWithCUDA(enableGPU, enableCUDA bool, cudaDeviceID int) 
 		memoryBuffer:    memoryBuffer,
 		asyncQueue:      asyncQueue,
 		processDone:     processDone,
-		// CUDA加速模块
-		cudaAccelerator: cudaAccelerator,
+		// CUDA加速模块（已简化，仅保留兼容性字段）
+		// cudaAccelerator 字段已移除
 		enableCUDA:      enableCUDA,
 		cudaDeviceID:    cudaDeviceID,
 		// 稳定性保障组件
@@ -604,17 +596,8 @@ func min(a, b int64) int64 {
 
 // OptimizedPreprocessImage 优化的图像预处理方法 - 极致性能版本 + CUDA加速
 func (vo *VideoOptimization) OptimizedPreprocessImage(img image.Image, inputWidth, inputHeight int) ([]float32, error) {
-	// 如果启用CUDA加速，优先使用CUDA预处理
-	if vo.enableCUDA && vo.cudaAccelerator != nil {
-		result, err := vo.cudaAccelerator.PreprocessImageCUDA(img, inputWidth, inputHeight)
-		if err == nil {
-			return result, nil
-		}
-		// CUDA失败时回退到CPU模式
-		fmt.Printf("⚠️ CUDA预处理失败，回退到CPU模式: %v\n", err)
-	}
-
-	// 使用CPU极致性能预处理
+	// 注意：自定义CUDA加速器已移除，现在使用CPU极致性能预处理
+	// ONNX Runtime会自动使用GPU加速（如果enableCUDA为true）
 	return vo.extremePreprocessImage(img, inputWidth, inputHeight)
 }
 
@@ -888,8 +871,9 @@ func (vo *VideoOptimization) IsGPUEnabled() bool {
 }
 
 // IsCUDAEnabled 检查是否启用CUDA加速
+// 注意：现在仅检查enableCUDA标志，因为自定义CUDA加速器已移除
 func (vo *VideoOptimization) IsCUDAEnabled() bool {
-	return vo.enableCUDA && vo.cudaAccelerator != nil
+	return vo.enableCUDA
 }
 
 // GetCUDADeviceID 获取CUDA设备ID
@@ -898,22 +882,26 @@ func (vo *VideoOptimization) GetCUDADeviceID() int {
 }
 
 // GetCUDAPerformanceMetrics 获取CUDA性能指标
+// GetCUDAPerformanceMetrics 获取CUDA性能指标（已简化）
+// 注意：自定义CUDA加速器已移除，此方法仅返回基本状态信息
 func (vo *VideoOptimization) GetCUDAPerformanceMetrics() map[string]interface{} {
-	if !vo.IsCUDAEnabled() {
-		return map[string]interface{}{
-			"enabled": false,
-			"error":   "CUDA未启用或初始化失败",
-		}
+	return map[string]interface{}{
+		"enabled":           vo.IsCUDAEnabled(),
+		"device_id":         vo.GetCUDADeviceID(),
+		"accelerator_type":  "ONNX Runtime CUDA",
+		"custom_accelerator": false,
+		"note":              "使用ONNX Runtime内置CUDA支持，无需自定义加速器",
 	}
-	return vo.cudaAccelerator.GetPerformanceMetrics()
 }
 
-// OptimizeCUDAMemory 优化CUDA内存使用
+// OptimizeCUDAMemory 优化CUDA内存使用（已简化）
+// 注意：自定义CUDA加速器已移除，此方法不再执行实际的内存优化
 func (vo *VideoOptimization) OptimizeCUDAMemory() error {
 	if !vo.IsCUDAEnabled() {
 		return fmt.Errorf("CUDA未启用")
 	}
-	return vo.cudaAccelerator.OptimizeMemoryUsage()
+	// 自定义CUDA加速器已移除，ONNX Runtime会自动管理CUDA内存
+	return nil
 }
 
 // GetPreprocessBuffer 获取预处理缓冲区
@@ -964,28 +952,8 @@ func (vo *VideoOptimization) BatchDetectImages(detector *YOLO, images []image.Im
 		inputHeight = detector.config.InputSize
 	}
 
-	// 如果启用CUDA加速，优先使用CUDA批处理
-	if vo.enableCUDA && vo.cudaAccelerator != nil {
-		batchData, err := vo.cudaAccelerator.BatchPreprocessImagesCUDA(images, inputWidth, inputHeight)
-		if err == nil {
-			// CUDA批处理成功，进行检测
-			results := make([][]Detection, len(images))
-			for i, data := range batchData {
-				detections, err := detector.detectWithPreprocessedData(data, images[i])
-				if err != nil {
-					return nil, fmt.Errorf("检测图像 %d 失败: %v", i, err)
-				}
-				results[i] = detections
-			}
-			
-			// ✅ CUDA批处理完成后安全清理内存（结果已保存到results中）
-			vo.SmartGarbageCollect(len(images) >= 20)
-			
-			return results, nil
-		}
-		// CUDA失败时回退到CPU模式
-		fmt.Printf("⚠️ CUDA批处理失败，回退到CPU模式: %v\n", err)
-	}
+	// 注意：自定义CUDA加速器已移除，现在使用CPU批处理
+	// ONNX Runtime会自动使用GPU加速（如果enableCUDA为true）
 
 	// 使用最大批处理大小
 	batchSize := vo.maxBatchSize
@@ -1231,12 +1199,8 @@ func (vo *VideoOptimization) Close() {
 	// 取消上下文，通知所有监控循环退出
 	vo.cancel()
 
-	// 关闭CUDA加速器
-	if vo.cudaAccelerator != nil {
-		fmt.Println("🔒 正在关闭CUDA加速器...")
-		vo.cudaAccelerator.Close()
-		vo.cudaAccelerator = nil
-	}
+	// 注意：自定义CUDA加速器已移除，无需清理
+	// ONNX Runtime会自动管理GPU资源
 
 	// 等待一小段时间让工作线程优雅退出
 	time.Sleep(100 * time.Millisecond)
