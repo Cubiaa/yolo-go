@@ -1174,7 +1174,7 @@ func (y *YOLO) GetVideoProcessor() *VidioVideoProcessor {
 	return NewVidioVideoProcessor(y)
 }
 
-// IsGPUAvailable 检测GPU是否可用
+// IsGPUAvailable 检测GPU是否可用 - 基于用户成功案例的方法
 func IsGPUAvailable() bool {
 	// 创建临时会话选项来测试GPU支持
 	sessionOptions, err := ort.NewSessionOptions()
@@ -1183,10 +1183,21 @@ func IsGPUAvailable() bool {
 	}
 	defer sessionOptions.Destroy()
 
-	// 测试CUDA
-	err = sessionOptions.AppendExecutionProviderCUDA(nil)
+	// 测试CUDA（使用正确的方法）
+	cudaOptions, err := ort.NewCUDAProviderOptions()
 	if err == nil {
-		return true
+		defer cudaOptions.Destroy()
+		// 更新CUDA选项
+		err = cudaOptions.Update(map[string]string{
+			"device_id": "0",
+		})
+		if err == nil {
+			// 尝试添加CUDA执行提供者
+			err = sessionOptions.AppendExecutionProviderCUDA(cudaOptions)
+			if err == nil {
+				return true
+			}
+		}
 	}
 
 	// 测试DirectML

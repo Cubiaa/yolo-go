@@ -333,15 +333,8 @@ func (ca *CUDAAccelerator) Close() error {
 
 // 以下是辅助函数和内部实现
 
-// isCUDAAvailable 检查CUDA是否可用
+// isCUDAAvailable 检查CUDA是否可用 - 基于用户成功案例的方法
 func isCUDAAvailable() bool {
-	// 尝试创建临时会话选项来测试CUDA
-	sessionOptions, err := ort.NewSessionOptions()
-	if err != nil {
-		return false
-	}
-	defer sessionOptions.Destroy()
-
 	// 使用defer recover来安全检测CUDA
 	defer func() {
 		if r := recover(); r != nil {
@@ -349,8 +342,30 @@ func isCUDAAvailable() bool {
 		}
 	}()
 
-	// 尝试添加CUDA执行提供者
-	err = sessionOptions.AppendExecutionProviderCUDA(nil)
+	// 尝试创建临时会话选项来测试CUDA
+	sessionOptions, err := ort.NewSessionOptions()
+	if err != nil {
+		return false
+	}
+	defer sessionOptions.Destroy()
+
+	// 按照用户成功案例的方法：先创建CUDA Provider Options
+	cudaOptions, err := ort.NewCUDAProviderOptions()
+	if err != nil {
+		return false
+	}
+	defer cudaOptions.Destroy()
+
+	// 更新CUDA选项（使用默认设备ID 0）
+	err = cudaOptions.Update(map[string]string{
+		"device_id": "0",
+	})
+	if err != nil {
+		return false
+	}
+
+	// 尝试添加CUDA执行提供者（使用正确的参数）
+	err = sessionOptions.AppendExecutionProviderCUDA(cudaOptions)
 	if err != nil {
 		return false
 	}
