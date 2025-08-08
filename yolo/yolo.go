@@ -258,70 +258,35 @@ func NewYOLO(modelPath, configPath string, config ...*YOLOConfig) (*YOLO, error)
 		fmt.Println("🔄 启用并行执行模式")
 	}
 
-	// 如果启用GPU，设置CUDA提供者
+	// 如果启用GPU，使用用户成功案例的CUDA初始化方法
 	if yoloConfig.UseGPU {
-		fmt.Println("🚀 尝试启用GPU加速...")
+		fmt.Println("🚀 启用GPU加速 - 使用优化的CUDA初始化方法")
 
-		var gpuInitialized bool
-		var lastError error
-
-		// 尝试添加CUDA执行提供者
+		// 步骤1: 配置 CUDA Provider（基于用户成功案例）
 		cudaOptions, err := ort.NewCUDAProviderOptions()
 		if err != nil {
-			lastError = fmt.Errorf("创建CUDA选项失败: %v", err)
-			fmt.Printf("⚠️  %v\n", lastError)
-		} else {
-			defer cudaOptions.Destroy()
-
-			// 设置CUDA选项
-			optionsMap := map[string]string{
-				"device_id": fmt.Sprintf("%d", yoloConfig.GPUDeviceID),
-			}
-			err = cudaOptions.Update(optionsMap)
-			if err != nil {
-				lastError = fmt.Errorf("更新CUDA选项失败: %v", err)
-				fmt.Printf("⚠️  %v\n", lastError)
-			} else {
-				err = sessionOptions.AppendExecutionProviderCUDA(cudaOptions)
-				if err != nil {
-					lastError = fmt.Errorf("CUDA不可用: %v", err)
-					fmt.Printf("⚠️  %v\n", lastError)
-				} else {
-					fmt.Println("✅ CUDA GPU加速已启用")
-					gpuInitialized = true
-				}
-			}
-		}
-
-		// 如果CUDA失败，尝试DirectML
-		if !gpuInitialized {
-			fmt.Println("🔄 尝试DirectML提供者...")
-			err2 := sessionOptions.AppendExecutionProviderDirectML(yoloConfig.GPUDeviceID)
-			if err2 != nil {
-				lastError = fmt.Errorf("DirectML不可用: %v", err2)
-				fmt.Printf("⚠️  %v\n", lastError)
-			} else {
-				fmt.Println("✅ DirectML GPU加速已启用")
-				gpuInitialized = true
-			}
-		}
-
-		// 如果GPU初始化失败，返回错误而不是回退到CPU
-		if !gpuInitialized {
 			sessionOptions.Destroy()
-			fmt.Printf("❌ GPU初始化失败: %v\n", lastError)
-			fmt.Println("💡 可能的原因:")
-			fmt.Println("   1. 没有兼容的GPU")
-			fmt.Println("   2. 没有安装CUDA/DirectML")
-			fmt.Println("   3. ONNX Runtime版本不支持GPU")
-			fmt.Println("   4. GPU驱动程序过旧")
-			fmt.Println("💡 解决方案:")
-			fmt.Println("   1. 检查GPU驱动是否最新")
-			fmt.Println("   2. 安装CUDA Toolkit")
-			fmt.Println("   3. 使用GPU版本的ONNX Runtime")
-			fmt.Println("   4. 或者使用 DefaultConfig() 让系统自动选择")
-			return nil, fmt.Errorf("GPU初始化失败，WithGPU(true)要求必须使用GPU")
+			return nil, fmt.Errorf("CUDA Provider 创建失败: %v", err)
 		}
+		defer cudaOptions.Destroy()
+
+		// 步骤2: 更新CUDA选项
+		err = cudaOptions.Update(map[string]string{
+			"device_id": fmt.Sprintf("%d", yoloConfig.GPUDeviceID),
+		})
+		if err != nil {
+			sessionOptions.Destroy()
+			return nil, fmt.Errorf("CUDA 配置失败: %v", err)
+		}
+
+		// 步骤3: 添加CUDA执行提供者
+		err = sessionOptions.AppendExecutionProviderCUDA(cudaOptions)
+		if err != nil {
+			sessionOptions.Destroy()
+			return nil, fmt.Errorf("CUDA EP 初始化失败: %v", err)
+		}
+
+		fmt.Println("✅ CUDA 初始化成功，已启用 GPU 推理")
 	} else {
 		fmt.Println("💻 使用CPU模式")
 	}

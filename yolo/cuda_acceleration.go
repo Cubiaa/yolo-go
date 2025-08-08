@@ -12,22 +12,22 @@ import (
 
 // CUDAAccelerator CUDA加速器 - 专门处理CUDA相关的GPU加速
 type CUDAAccelerator struct {
-	mu              sync.RWMutex
-	enabled         bool
-	deviceID        int
-	streamCount     int
-	memoryPool      *CUDAMemoryPool
-	streamManager   *CUDAStreamManager
-	preprocessor    *CUDAPreprocessor
-	batchProcessor  *CUDABatchProcessor
+	mu                 sync.RWMutex
+	enabled            bool
+	deviceID           int
+	streamCount        int
+	memoryPool         *CUDAMemoryPool
+	streamManager      *CUDAStreamManager
+	preprocessor       *CUDAPreprocessor
+	batchProcessor     *CUDABatchProcessor
 	performanceMonitor *CUDAPerformanceMonitor
 }
 
 // CUDAMemoryPool CUDA内存池管理
 type CUDAMemoryPool struct {
-	mu            sync.Mutex
-	deviceBuffers []CUDABuffer
-	hostBuffers   []CUDABuffer
+	mu                sync.Mutex
+	deviceBuffers     []CUDABuffer
+	hostBuffers       []CUDABuffer
 	freeDeviceBuffers chan CUDABuffer
 	freeHostBuffers   chan CUDABuffer
 	totalAllocated    int64
@@ -44,21 +44,21 @@ type CUDABuffer struct {
 
 // CUDAStreamManager CUDA流管理器
 type CUDAStreamManager struct {
-	mu               sync.RWMutex
-	preprocessStream uintptr // cudaStream_t
-	inferenceStream  uintptr // cudaStream_t
-	postprocessStream uintptr // cudaStream_t
-	copyStreams      []uintptr // 多个拷贝流
-	streamPool       chan uintptr
+	mu                sync.RWMutex
+	preprocessStream  uintptr   // cudaStream_t
+	inferenceStream   uintptr   // cudaStream_t
+	postprocessStream uintptr   // cudaStream_t
+	copyStreams       []uintptr // 多个拷贝流
+	streamPool        chan uintptr
 }
 
 // CUDAPreprocessor CUDA图像预处理器
 type CUDAPreprocessor struct {
-	mu           sync.RWMutex
-	initialized  bool
-	kernelCache  map[string]uintptr // CUDA kernel缓存
-	tempBuffers  []CUDABuffer
-	resizeKernel uintptr
+	mu              sync.RWMutex
+	initialized     bool
+	kernelCache     map[string]uintptr // CUDA kernel缓存
+	tempBuffers     []CUDABuffer
+	resizeKernel    uintptr
 	normalizeKernel uintptr
 }
 
