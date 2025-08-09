@@ -9,7 +9,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -2090,12 +2089,14 @@ func (y *YOLO) processRTSPWithFFmpeg(rtspURL string, options *DetectionOptions, 
 		y.SetRuntimeConfig(options)
 	}
 
+	fmt.Println("🔧 构建FFmpeg命令...")
 	// 构建FFmpeg命令
 	cmd := exec.Command("ffmpeg",
 		"-i", rtspURL,
 		"-f", "rawvideo",
 		"-pix_fmt", "rgb24",
 		"-vf", "scale=640:480", // 固定尺寸便于处理
+		"-r", "10", // 限制帧率为10fps
 		"-",
 	)
 
@@ -2104,11 +2105,33 @@ func (y *YOLO) processRTSPWithFFmpeg(rtspURL string, options *DetectionOptions, 
 		return fmt.Errorf("创建FFmpeg输出管道失败: %v", err)
 	}
 
+	// 获取stderr用于调试
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("创建FFmpeg错误管道失败: %v", err)
+	}
+
+	fmt.Println("🚀 启动FFmpeg进程...")
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动FFmpeg失败: %v", err)
 	}
 
+	// 在goroutine中读取错误信息
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, err := stderr.Read(buf)
+			if err != nil {
+				break
+			}
+			if n > 0 {
+				fmt.Printf("FFmpeg调试: %s", string(buf[:n]))
+			}
+		}
+	}()
+
 	defer func() {
+		fmt.Println("🛑 停止FFmpeg进程...")
 		cmd.Process.Kill()
 		cmd.Wait()
 	}()
@@ -2118,33 +2141,57 @@ func (y *YOLO) processRTSPWithFFmpeg(rtspURL string, options *DetectionOptions, 
 	buffer := make([]byte, frameSize)
 	frameNumber := 0
 
+	fmt.Printf("📊 期望帧大小: %d 字节 (640x480x3)\n", frameSize)
+	fmt.Println("🔄 开始读取帧数据...")
+
 	for {
-		n, err := stdout.Read(buffer)
-		if err != nil {
-			break
+		// 逐字节读取完整帧
+		bytesRead := 0
+		for bytesRead < frameSize {
+			n, err := stdout.Read(buffer[bytesRead:])
+			if err != nil {
+				if bytesRead > 0 {
+					fmt.Printf("⚠️ 读取中断，已读取 %d/%d 字节\n", bytesRead, frameSize)
+				}
+				return fmt.Errorf("读取帧数据失败: %v", err)
+			}
+			bytesRead += n
+			if frameNumber == 0 && bytesRead <= 100 {
+				fmt.Printf("📥 已读取 %d/%d 字节...\n", bytesRead, frameSize)
+			}
 		}
-		if n != frameSize {
-			continue
+
+		if frameNumber == 0 {
+			fmt.Printf("✅ 成功读取第一帧，共 %d 字节\n", bytesRead)
 		}
 
 		// 将字节数据转换为image.Image
 		img := y.bytesToImage(buffer, 640, 480)
 		if img == nil {
+			fmt.Printf("❌ 第 %d 帧：bytesToImage返回nil\n", frameNumber)
 			continue
+		}
+
+		if frameNumber == 0 {
+			fmt.Printf("🖼️ 成功转换第一帧为图像，尺寸: %dx%d\n", img.Bounds().Dx(), img.Bounds().Dy())
 		}
 
 		// 执行检测
 		detections, err := y.callDetectImage(img)
 		if err != nil {
-			fmt.Printf("检测失败: %v\n", err)
+			fmt.Printf("❌ 第 %d 帧检测失败: %v\n", frameNumber, err)
 			continue
+		}
+
+		if frameNumber == 0 {
+			fmt.Printf("🎯 第一帧检测完成，发现 %d 个对象\n", len(detections))
 		}
 
 		// 调用回调函数
 		if callback != nil {
 			result := VideoDetectionResult{
 				FrameNumber: frameNumber,
-				Timestamp:   time.Duration(frameNumber) * time.Millisecond * 33, // 假设30fps
+				Timestamp:   time.Duration(frameNumber) * time.Millisecond * 100, // 10fps
 				Detections:  detections,
 				Image:       img,
 			}
@@ -2152,6 +2199,9 @@ func (y *YOLO) processRTSPWithFFmpeg(rtspURL string, options *DetectionOptions, 
 		}
 
 		frameNumber++
+		if frameNumber%50 == 0 {
+			fmt.Printf("📊 已处理 %d 帧\n", frameNumber)
+		}
 	}
 
 	return nil
@@ -2169,12 +2219,14 @@ func (y *YOLO) processRTMPWithFFmpeg(rtmpURL string, options *DetectionOptions, 
 		y.SetRuntimeConfig(options)
 	}
 
+	fmt.Println("🔧 构建FFmpeg命令...")
 	// 构建FFmpeg命令
 	cmd := exec.Command("ffmpeg",
 		"-i", rtmpURL,
 		"-f", "rawvideo",
 		"-pix_fmt", "rgb24",
 		"-vf", "scale=640:480", // 固定尺寸便于处理
+		"-r", "10", // 限制帧率为10fps
 		"-",
 	)
 
@@ -2183,11 +2235,33 @@ func (y *YOLO) processRTMPWithFFmpeg(rtmpURL string, options *DetectionOptions, 
 		return fmt.Errorf("创建FFmpeg输出管道失败: %v", err)
 	}
 
+	// 获取stderr用于调试
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("创建FFmpeg错误管道失败: %v", err)
+	}
+
+	fmt.Println("🚀 启动FFmpeg进程...")
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动FFmpeg失败: %v", err)
 	}
 
+	// 在goroutine中读取错误信息
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, err := stderr.Read(buf)
+			if err != nil {
+				break
+			}
+			if n > 0 {
+				fmt.Printf("FFmpeg调试: %s", string(buf[:n]))
+			}
+		}
+	}()
+
 	defer func() {
+		fmt.Println("🛑 停止FFmpeg进程...")
 		cmd.Process.Kill()
 		cmd.Wait()
 	}()
@@ -2197,33 +2271,57 @@ func (y *YOLO) processRTMPWithFFmpeg(rtmpURL string, options *DetectionOptions, 
 	buffer := make([]byte, frameSize)
 	frameNumber := 0
 
+	fmt.Printf("📊 期望帧大小: %d 字节 (640x480x3)\n", frameSize)
+	fmt.Println("🔄 开始读取帧数据...")
+
 	for {
-		n, err := stdout.Read(buffer)
-		if err != nil {
-			break
+		// 逐字节读取完整帧
+		bytesRead := 0
+		for bytesRead < frameSize {
+			n, err := stdout.Read(buffer[bytesRead:])
+			if err != nil {
+				if bytesRead > 0 {
+					fmt.Printf("⚠️ 读取中断，已读取 %d/%d 字节\n", bytesRead, frameSize)
+				}
+				return fmt.Errorf("读取帧数据失败: %v", err)
+			}
+			bytesRead += n
+			if frameNumber == 0 && bytesRead <= 100 {
+				fmt.Printf("📥 已读取 %d/%d 字节...\n", bytesRead, frameSize)
+			}
 		}
-		if n != frameSize {
-			continue
+
+		if frameNumber == 0 {
+			fmt.Printf("✅ 成功读取第一帧，共 %d 字节\n", bytesRead)
 		}
 
 		// 将字节数据转换为image.Image
 		img := y.bytesToImage(buffer, 640, 480)
 		if img == nil {
+			fmt.Printf("❌ 第 %d 帧：bytesToImage返回nil\n", frameNumber)
 			continue
+		}
+
+		if frameNumber == 0 {
+			fmt.Printf("🖼️ 成功转换第一帧为图像，尺寸: %dx%d\n", img.Bounds().Dx(), img.Bounds().Dy())
 		}
 
 		// 执行检测
 		detections, err := y.callDetectImage(img)
 		if err != nil {
-			fmt.Printf("检测失败: %v\n", err)
+			fmt.Printf("❌ 第 %d 帧检测失败: %v\n", frameNumber, err)
 			continue
+		}
+
+		if frameNumber == 0 {
+			fmt.Printf("🎯 第一帧检测完成，发现 %d 个对象\n", len(detections))
 		}
 
 		// 调用回调函数
 		if callback != nil {
 			result := VideoDetectionResult{
 				FrameNumber: frameNumber,
-				Timestamp:   time.Duration(frameNumber) * time.Millisecond * 33, // 假设30fps
+				Timestamp:   time.Duration(frameNumber) * time.Millisecond * 100, // 10fps
 				Detections:  detections,
 				Image:       img,
 			}
@@ -2231,6 +2329,9 @@ func (y *YOLO) processRTMPWithFFmpeg(rtmpURL string, options *DetectionOptions, 
 		}
 
 		frameNumber++
+		if frameNumber%50 == 0 {
+			fmt.Printf("📊 已处理 %d 帧\n", frameNumber)
+		}
 	}
 
 	return nil
@@ -2273,30 +2374,8 @@ func (y *YOLO) bytesToImage(data []byte, width, height int) image.Image {
 
 // callDetectImage 使用反射调用私有的detectImage方法
 func (y *YOLO) callDetectImage(img image.Image) ([]Detection, error) {
-	v := reflect.ValueOf(y)
-	method := v.MethodByName("detectImage")
-	if !method.IsValid() {
-		return nil, fmt.Errorf("detectImage方法不存在")
-	}
-
-	results := method.Call([]reflect.Value{reflect.ValueOf(img)})
-	if len(results) != 2 {
-		return nil, fmt.Errorf("detectImage方法返回值数量不正确")
-	}
-
-	detections, ok := results[0].Interface().([]Detection)
-	if !ok {
-		return nil, fmt.Errorf("无法转换检测结果")
-	}
-
-	if !results[1].IsNil() {
-		err, ok := results[1].Interface().(error)
-		if ok {
-			return nil, err
-		}
-	}
-
-	return detections, nil
+	// 直接调用detectImage方法，不使用反射
+	return y.detectImage(img)
 }
 
 func loadClassesFromYAML(configPath string) error {
