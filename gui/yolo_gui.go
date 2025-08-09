@@ -428,8 +428,82 @@ func (live *YOLOLiveWindow) processVideo() {
 				live.statusLabel.SetText(fmt.Sprintf("摄像头处理失败: %v", err))
 			})
 		}
+	} else if live.inputSource.GetInputType() == "rtsp" {
+		// 使用直接FFmpeg方式处理RTSP流
+		inputPath := live.inputSource.GetFFmpegInput()
+		
+		_, err := live.detector.DetectFromRTSP(inputPath, detectionOptions, func(result yolo.VideoDetectionResult) {
+			if !live.isPlaying {
+				return
+			}
+
+			frameCount++
+
+			// 跳帧处理以提高性能
+			if frameCount%live.frameSkip != 0 {
+				return
+			}
+
+			// 异步发送检测结果到UI更新协程
+			select {
+			case detectionChan <- struct{
+				img image.Image
+				detections []yolo.Detection
+				frameNum int
+			}{img: result.Image, detections: result.Detections, frameNum: frameCount}:
+				fmt.Printf("成功发送第 %d 帧到GUI更新通道\n", frameCount)
+			default:
+				fmt.Printf("GUI更新通道满，跳过第 %d 帧\n", frameCount)
+			}
+
+			// 控制播放速度
+			time.Sleep(33 * time.Millisecond) // 约30 FPS
+		})
+		
+		if err != nil {
+			fyne.Do(func() {
+				live.statusLabel.SetText(fmt.Sprintf("RTSP处理失败: %v", err))
+			})
+		}
+	} else if live.inputSource.GetInputType() == "rtmp" {
+		// 使用直接FFmpeg方式处理RTMP流
+		inputPath := live.inputSource.GetFFmpegInput()
+		
+		_, err := live.detector.DetectFromRTMP(inputPath, detectionOptions, func(result yolo.VideoDetectionResult) {
+			if !live.isPlaying {
+				return
+			}
+
+			frameCount++
+
+			// 跳帧处理以提高性能
+			if frameCount%live.frameSkip != 0 {
+				return
+			}
+
+			// 异步发送检测结果到UI更新协程
+			select {
+			case detectionChan <- struct{
+				img image.Image
+				detections []yolo.Detection
+				frameNum int
+			}{img: result.Image, detections: result.Detections, frameNum: frameCount}:
+				fmt.Printf("成功发送第 %d 帧到GUI更新通道\n", frameCount)
+			default:
+				fmt.Printf("GUI更新通道满，跳过第 %d 帧\n", frameCount)
+			}
+
+			// 控制播放速度
+			time.Sleep(33 * time.Millisecond) // 约30 FPS
+		})
+		
+		if err != nil {
+			fyne.Do(func() {
+				live.statusLabel.SetText(fmt.Sprintf("RTMP处理失败: %v", err))
+			})
+		}
 	} else {
-		// 使用原有的视频处理器处理文件、RTSP、RTMP等
+		// 使用原有的视频处理器处理文件等
 		processor := yolo.NewVidioVideoProcessorWithOptions(live.detector, detectionOptions)
 		inputPath := live.inputSource.GetFFmpegInput()
 
