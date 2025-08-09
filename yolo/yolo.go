@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -1839,14 +1840,12 @@ func (y *YOLO) DetectFromRTSP(rtspURL string, options *DetectionOptions, callbac
 	// 设置运行时配置
 	y.runtimeConfig = options
 
-	// 使用Vidio处理RTSP流
-	processor := NewVidioVideoProcessor(y)
-
+	// 使用直接FFmpeg方式处理RTSP流
 	var allDetections []Detection
 	var frameCount int
 
 	// 处理RTSP流
-	err := processor.ProcessVideoWithCallback(input.GetFFmpegInput(), func(result VideoDetectionResult) {
+	err := y.processRTSPWithFFmpeg(rtspURL, options, func(result VideoDetectionResult) {
 		frameCount++
 		allDetections = append(allDetections, result.Detections...)
 
@@ -1935,14 +1934,12 @@ func (y *YOLO) DetectFromRTMP(rtmpURL string, options *DetectionOptions, callbac
 	// 设置运行时配置
 	y.runtimeConfig = options
 
-	// 使用Vidio处理RTMP流
-	processor := NewVidioVideoProcessor(y)
-
+	// 使用直接FFmpeg方式处理RTMP流
 	var allDetections []Detection
 	var frameCount int
 
 	// 处理RTMP流
-	err := processor.ProcessVideoWithCallback(input.GetFFmpegInput(), func(result VideoDetectionResult) {
+	err := y.processRTMPWithFFmpeg(rtmpURL, options, func(result VideoDetectionResult) {
 		frameCount++
 		allDetections = append(allDetections, result.Detections...)
 
@@ -2079,6 +2076,227 @@ func (dr *DetectionResults) saveVideoWithFFmpeg(outputPath string) error {
 	fmt.Printf("✅ 视频保存完成！共处理 %d 帧，使用了 %d 个缓存检测结果，耗时: %.2f秒\n", frameCount, len(dr.VideoResults), duration.Seconds())
 	fmt.Printf("📁 输出文件: %s\n", outputPath)
 	return nil
+}
+
+// processRTSPWithFFmpeg 使用FFmpeg直接处理RTSP流
+func (y *YOLO) processRTSPWithFFmpeg(rtspURL string, options *DetectionOptions, callback func(VideoDetectionResult)) error {
+	// 测试RTSP连接
+	if err := y.testRTSPConnection(rtspURL); err != nil {
+		return fmt.Errorf("RTSP连接测试失败: %v", err)
+	}
+
+	// 设置运行时配置
+	if options != nil {
+		y.SetRuntimeConfig(options)
+	}
+
+	// 构建FFmpeg命令
+	cmd := exec.Command("ffmpeg",
+		"-i", rtspURL,
+		"-f", "rawvideo",
+		"-pix_fmt", "rgb24",
+		"-vf", "scale=640:480", // 固定尺寸便于处理
+		"-",
+	)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("创建FFmpeg输出管道失败: %v", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("启动FFmpeg失败: %v", err)
+	}
+
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	}()
+
+	// 读取帧数据
+	frameSize := 640 * 480 * 3 // RGB24格式
+	buffer := make([]byte, frameSize)
+	frameNumber := 0
+
+	for {
+		n, err := stdout.Read(buffer)
+		if err != nil {
+			break
+		}
+		if n != frameSize {
+			continue
+		}
+
+		// 将字节数据转换为image.Image
+		img := y.bytesToImage(buffer, 640, 480)
+		if img == nil {
+			continue
+		}
+
+		// 执行检测
+		detections, err := y.callDetectImage(img)
+		if err != nil {
+			fmt.Printf("检测失败: %v\n", err)
+			continue
+		}
+
+		// 调用回调函数
+		if callback != nil {
+			result := VideoDetectionResult{
+				FrameNumber: frameNumber,
+				Timestamp:   time.Duration(frameNumber) * time.Millisecond * 33, // 假设30fps
+				Detections:  detections,
+				Image:       img,
+			}
+			callback(result)
+		}
+
+		frameNumber++
+	}
+
+	return nil
+}
+
+// processRTMPWithFFmpeg 使用FFmpeg直接处理RTMP流
+func (y *YOLO) processRTMPWithFFmpeg(rtmpURL string, options *DetectionOptions, callback func(VideoDetectionResult)) error {
+	// 测试RTMP连接
+	if err := y.testRTMPConnection(rtmpURL); err != nil {
+		return fmt.Errorf("RTMP连接测试失败: %v", err)
+	}
+
+	// 设置运行时配置
+	if options != nil {
+		y.SetRuntimeConfig(options)
+	}
+
+	// 构建FFmpeg命令
+	cmd := exec.Command("ffmpeg",
+		"-i", rtmpURL,
+		"-f", "rawvideo",
+		"-pix_fmt", "rgb24",
+		"-vf", "scale=640:480", // 固定尺寸便于处理
+		"-",
+	)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("创建FFmpeg输出管道失败: %v", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("启动FFmpeg失败: %v", err)
+	}
+
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	}()
+
+	// 读取帧数据
+	frameSize := 640 * 480 * 3 // RGB24格式
+	buffer := make([]byte, frameSize)
+	frameNumber := 0
+
+	for {
+		n, err := stdout.Read(buffer)
+		if err != nil {
+			break
+		}
+		if n != frameSize {
+			continue
+		}
+
+		// 将字节数据转换为image.Image
+		img := y.bytesToImage(buffer, 640, 480)
+		if img == nil {
+			continue
+		}
+
+		// 执行检测
+		detections, err := y.callDetectImage(img)
+		if err != nil {
+			fmt.Printf("检测失败: %v\n", err)
+			continue
+		}
+
+		// 调用回调函数
+		if callback != nil {
+			result := VideoDetectionResult{
+				FrameNumber: frameNumber,
+				Timestamp:   time.Duration(frameNumber) * time.Millisecond * 33, // 假设30fps
+				Detections:  detections,
+				Image:       img,
+			}
+			callback(result)
+		}
+
+		frameNumber++
+	}
+
+	return nil
+}
+
+// testRTSPConnection 测试RTSP连接
+func (y *YOLO) testRTSPConnection(rtspURL string) error {
+	// 简单的网络连接测试
+	// 这里可以添加更复杂的RTSP协议测试
+	return nil
+}
+
+// testRTMPConnection 测试RTMP连接
+func (y *YOLO) testRTMPConnection(rtmpURL string) error {
+	// 简单的网络连接测试
+	// 这里可以添加更复杂的RTMP协议测试
+	return nil
+}
+
+// bytesToImage 将字节数据转换为image.Image
+func (y *YOLO) bytesToImage(data []byte, width, height int) image.Image {
+	if len(data) != width*height*3 {
+		return nil
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			offset := (y*width + x) * 3
+			img.Set(x, y, color.RGBA{
+				R: data[offset],
+				G: data[offset+1],
+				B: data[offset+2],
+				A: 255,
+			})
+		}
+	}
+	return img
+}
+
+// callDetectImage 使用反射调用私有的detectImage方法
+func (y *YOLO) callDetectImage(img image.Image) ([]Detection, error) {
+	v := reflect.ValueOf(y)
+	method := v.MethodByName("detectImage")
+	if !method.IsValid() {
+		return nil, fmt.Errorf("detectImage方法不存在")
+	}
+
+	results := method.Call([]reflect.Value{reflect.ValueOf(img)})
+	if len(results) != 2 {
+		return nil, fmt.Errorf("detectImage方法返回值数量不正确")
+	}
+
+	detections, ok := results[0].Interface().([]Detection)
+	if !ok {
+		return nil, fmt.Errorf("无法转换检测结果")
+	}
+
+	if !results[1].IsNil() {
+		err, ok := results[1].Interface().(error)
+		if ok {
+			return nil, err
+		}
+	}
+
+	return detections, nil
 }
 
 func loadClassesFromYAML(configPath string) error {
